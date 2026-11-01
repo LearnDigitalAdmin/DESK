@@ -15,7 +15,8 @@ import { STATE } from '../constants/states';
 import { logger } from '../utils/logger';
 import { db } from '../config/firebase.config';
 import { initiatePayment, hasPaymentInfo, getAssetContactInfo } from '../services/payment.service';
-import { btn, mainButton, mainMenuReply, Reply, uiButtons, uiText, welcomeReply, withNotice } from '../utils/ui';
+import { btn, mainButton, mainMenuReply, Reply, row, uiButtons, uiList, uiText, welcomeReply, withNotice } from '../utils/ui';
+import { startLmm } from './lmm.handler';
 import { Outbound } from '../types/watch.types';
 
 interface TenantData {
@@ -77,14 +78,27 @@ function promptTenantId(lang: Lang): Outbound {
 }
 
 function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outbound {
-  return uiButtons(
+  // A list, not buttons: WhatsApp shows at most 3 buttons, and there are now 4 choices (the row ids are the same values as before).
+  return uiList(
     getMessage('TENANT_FOUND', lang, {
       name: tenant.name,
       outstanding: formatCurrency(outstandingOf(invoice)),
       billing: String(invoice.billingMonth),
     }),
-    [btn('CONTINUE', ulabel('CONTINUE', lang)), btn('EDIT', ulabel('SEARCH_AGAIN', lang)), mainButton(lang)]
+    ulabel('LIST_BUTTON', lang),
+    [
+      row('CONTINUE', ulabel('PAY_ALL_AT_ONCE', lang)),
+      row('LMM', ulabel('LMM', lang)),
+      row('EDIT', ulabel('SEARCH_AGAIN', lang)),
+      row('#', ulabel('MAIN', lang)),
+    ]
   );
+}
+
+/** The tenant-found screen rebuilt from the saved session (used by Lipa Mos Mos to go back). */
+export function tenantFoundScreen(session: Session): Outbound | null {
+  const { tenant, invoice } = readSaved(session);
+  return tenant && invoice ? tenantFound(session.language, tenant, invoice) : null;
 }
 
 function promptPhone(lang: Lang): Outbound {
@@ -344,6 +358,9 @@ export async function handlePayRentMpesa(phone: string, input: string, session: 
       await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
       return promptTenantId(lang);
     }
+
+    // Lipa Mos Mos: pay a little at a time
+    if (response === 'LMM') return startLmm(phone, session);
 
     // Handle CONTINUE
     if (['CONTINUE', 'ENDELEA', 'YES', 'NDIO'].includes(response)) {

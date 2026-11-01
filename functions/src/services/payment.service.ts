@@ -95,7 +95,7 @@ function calculateFees(amount: number, invoiceBalance: number): {
  * Call backend cloud function via HTTP POST (Callable format)
  * Firebase callable functions expect data wrapped in { data: {...} }
  */
-function callCloudFunction(
+export function callCloudFunction(
   functionUrl: string,
   payload: any
 ): Promise<any> {

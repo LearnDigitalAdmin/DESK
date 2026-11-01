@@ -84,7 +84,7 @@ describe('stale taps', () => {
     const r = fresh();
     await r.say('1');
     await r.say(TENANT_ID);
-    await r.tap('Continue');
+    await r.tap('Pay in full');
     await r.say('0712345678');
     await r.tap('Pay full amount');
     const confirmId = ids(r)[0];
@@ -110,16 +110,16 @@ describe('Pay Rent', () => {
     assert.equal(r.state, STATE.PAY_RENT_MPESA);
     assert.match(r.body(), /Jane Wanjiru/);
     assert.match(r.body(), /15,500/);
-    assert.deepEqual(r.titles(), ['Continue', 'Search again', 'Main menu']);
+    assert.deepEqual(r.titles(), ['Pay in full', 'Lipa Mos Mos', 'Search again', 'Main menu']);
 
-    await r.tap('Continue');
+    await r.tap('Pay in full');
     assert.equal(r.state, STATE.PAY_RENT_AMOUNT);
     assert.deepEqual(r.titles(), ['Back', 'Main menu']);
 
     await r.tap('Back'); // used to land on the tenant-ID prompt in the wrong state
     assert.equal(r.state, STATE.PAY_RENT_MPESA);
     assert.match(r.body(), /Jane Wanjiru/);
-    await r.tap('Continue');
+    await r.tap('Pay in full');
 
     await r.say('12345');
     assert.match(r.body(), /Invalid phone number/);
@@ -175,7 +175,7 @@ describe('Pay Rent', () => {
     await r.say(TENANT_ID);
     assert.match(r.body(), /Mpangaji amepatikana/);
     assert.doesNotMatch(r.body(), /[Mm]kokoteni/);
-    assert.deepEqual(r.titles(), ['Endelea', 'Tafuta tena', 'Menyu kuu']);
+    assert.deepEqual(r.titles(), ['Lipa kikamilifu', 'Lipa Mos Mos', 'Tafuta tena', 'Menyu kuu']);
   });
 });
 
@@ -356,5 +356,80 @@ describe('Landlord Watch hand-off', () => {
     await r.tapId('ui:MAIN_MENU:1');
     assert.equal(r.state, before);
     assert.match(r.body(), /no longer active/);
+  });
+});
+
+
+describe('Lipa Mos Mos (pay rent a little at a time)', () => {
+  const rentPay = require('../../services/payment.service');
+  const calls: { name: string; data: any }[] = [];
+  const install = (impl: (name: string, data: any) => any) => {
+    rentPay.callCloudFunction = async (url: string, data: any) => { const name = url.split('/').pop() as string; calls.push({ name, data }); return impl(name, data); };
+  };
+  const planView = (over: any = {}) => ({ frequency: 'weekly', status: 'active', targetMinor: 1_550_000, creditedMinor: 300_000, remainingMinor: 1_250_000, pct: 19, settlesOn: '2026-11-05', suggestedMinor: 300_000, ...over });
+  const toTenant = async (lang: 'en' | 'sw' = 'en') => {
+    const r = fresh(lang); await r.say('1'); await r.say(TENANT_ID); return r;
+  };
+
+  test('the tenant-found screen offers Lipa Mos Mos in English and Swahili', async () => {
+    calls.length = 0;
+    assert.ok((await toTenant('en')).titles().includes('Lipa Mos Mos'));
+    assert.ok((await toTenant('sw')).titles().includes('Lipa Mos Mos'));
+  });
+
+  test('no plan yet: asks how often, starts the plan, then asks how much, previews the fee, and pays through PAY', async () => {
+    calls.length = 0;
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: null, targetMinor: 1_550_000, settlesOn: '2026-11-05', suggestedMinor: 300_000 }
+      : name === 'lmm_start' ? { available: true, plan: planView({ creditedMinor: 0 }) } : { reference: 'LMM_x', displayText: 'Enter PIN' });
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Pay your rent a little at a time/); assert.match(r.body(), /KES 15,500/);
+    assert.deepEqual(r.titles(), ['Daily', 'Weekly', 'Every 2 weeks', 'Back', 'Main menu']);
+    await r.tap('Weekly'); assert.equal(r.state, STATE.LMM_AMOUNT); assert.match(r.body(), /whole-shilling/);
+    await r.say('12.5'); assert.match(r.body(), /whole-shilling amount between KES 10/);
+    await r.say('9'); assert.match(r.body(), /whole-shilling amount between KES 10/);
+    await r.say('3000'); assert.equal(r.state, STATE.LMM_PHONE);
+    await r.say('0712345678'); assert.equal(r.state, STATE.LMM_CONFIRM);
+    assert.match(r.body(), /To your rent: KES 3,000/); assert.match(r.body(), /Fee \(2.5%\): KES 75/); assert.match(r.body(), /You pay: KES 3,075/);
+    await r.tap('Confirm');
+    const pay = calls.find((c) => c.name === 'lmm_pay')!;
+    assert.deepEqual(pay.data, { agentId: pay.data.agentId, tenantId: pay.data.tenantId, amount: 3000, phone: '0712345678' });
+    assert.match(r.allText(), /Check your phone for the M-Pesa prompt/); assert.equal(r.state, STATE.MAIN_MENU);
+  });
+
+  test('under KES 100 the preview shows the 5% fee', async () => {
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { reference: 'LMM_x', displayText: 'ok' });
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    assert.match(r.body(), /Progress: 19%/); assert.match(r.body(), /Balance: KES 12,500/);
+    await r.tap('Pay now'); await r.say('50'); await r.say('0712345678');
+    assert.match(r.body(), /Fee \(5%\): KES 3/); assert.match(r.body(), /You pay: KES 53/);
+  });
+
+  test('an existing plan shows progress; Back steps back one screen at a time', async () => {
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    await r.tap('Pay now'); assert.equal(r.state, STATE.LMM_AMOUNT);
+    await r.say('3000'); assert.equal(r.state, STATE.LMM_PHONE);
+    await r.tap('Back'); assert.equal(r.state, STATE.LMM_AMOUNT);
+    await r.tap('Back'); assert.equal(r.state, STATE.LMM_MENU);
+    await r.tap('Back'); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.ok(r.titles().includes('Lipa Mos Mos'));
+  });
+
+  test('not available for this landlord: says so and returns to the tenant screen', async () => {
+    install(() => ({ available: false, reason: 'This landlord has not enabled Lipa Mos Mos yet.' }));
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.match(r.body(), /not available right now/); assert.match(r.body(), /has not enabled/);
+  });
+
+  test('a PAY error is shown to the tenant and nothing is paid', async () => {
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { error: { message: 'That is more than you owe. The balance is KES 12,500.' } });
+    const r = await toTenant(); await r.tap('Lipa Mos Mos'); await r.tap('Pay now'); await r.say('3000'); await r.say('0712345678'); await r.tap('Confirm');
+    assert.match(r.allText(), /We could not complete that: That is more than you owe/);
+  });
+
+  test('Swahili screens', async () => {
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
+    const r = await toTenant('sw'); await r.tap('Lipa Mos Mos');
+    assert.match(r.body(), /Umelipa: KES 3,000 kati ya KES 15,500/); assert.deepEqual(r.titles(), ['Lipa sasa', 'Badilisha mara', 'Nyuma']);
+    await r.tap('Lipa sasa'); assert.match(r.body(), /shilingi kamili/);
   });
 });

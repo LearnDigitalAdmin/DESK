@@ -1,5 +1,0 @@
-// desk.storage.rules.fragment — merge into the ONE storage.rules deployed for the default bucket.
-// Registration documents are uploaded and read ONLY through desk_uploadDoc / desk_top_getDoc (Admin SDK).
-match /desk-docs/{allPaths=**} {
-  allow read, write: if false;
-}

@@ -9,6 +9,7 @@ import { clearSessionContext, createOrGetSession, updateSessionState } from '../
 import { sendWhatsAppMessage, formatPhoneForWhatsApp } from '../services/whatsapp.service';
 import { sendReply } from '../services/outbound.service';
 import { handleLanguageSelection } from '../handlers/language.handler';
+import { handleLmmAmount, handleLmmConfirm, handleLmmFreq, handleLmmMenu, handleLmmPhone } from '../handlers/lmm.handler';
 import { handleHelpMenu, handleIdle, handleMainMenu } from '../handlers/menu.handler';
 import {
   handleMyChamaAuthPhone,
@@ -218,6 +219,22 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
       case STATE.PAY_RENT_CONFIRM_AMOUNT:
         logger.info('Routing to pay rent confirm amount handler');
         response = await handlePayRentConfirmAmount(phone, input, session);
+        break;
+
+      case STATE.LMM_MENU:
+        response = await handleLmmMenu(phone, input, session);
+        break;
+      case STATE.LMM_FREQ:
+        response = await handleLmmFreq(phone, input, session);
+        break;
+      case STATE.LMM_AMOUNT:
+        response = await handleLmmAmount(phone, input, session);
+        break;
+      case STATE.LMM_PHONE:
+        response = await handleLmmPhone(phone, input, session);
+        break;
+      case STATE.LMM_CONFIRM:
+        response = await handleLmmConfirm(phone, input, session);
         break;
 
       case STATE.GET_INVOICE_WAITING_ID:

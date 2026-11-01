@@ -110,6 +110,47 @@ export const MESSAGES = {
     sw: '*Mpangaji amepatikana* 🎯\n\n👤 Jina: {name}\n💰 Kiasi kinachodaiwa: {outstanding}\n📅 Mwezi wa bili: {billing}\n\nUngependa kuendelea kulipa ankara hii?',
   },
 
+  // Lipa Mos Mos: pay rent a little at a time
+  LMM_INTRO: {
+    en: '*Lipa Mos Mos* 🪙\n\nPay your rent a little at a time. You owe {due}. Your landlord is paid when it is fully covered, or on {settles}. A small fee (2.5%, or 5% on payments under KES 100) is added to each payment.\n\nHow often would you like to pay?',
+    sw: '*Lipa Mos Mos* 🪙\n\nLipa kodi yako kidogo kidogo. Unadaiwa {due}. Mwenye nyumba analipwa kodi ikikamilika, au tarehe {settles}. Ada ndogo (2.5%, au 5% kwa malipo chini ya KES 100) huongezwa kwa kila malipo.\n\nUngependa kulipa mara ngapi?',
+  },
+
+  LMM_STATUS: {
+    en: '*Lipa Mos Mos* 🪙\n\n💰 Paid: {paid} of {due}\n📊 Progress: {pct}%\n⚖️ Balance: {balance}\n📅 Landlord is paid by: {settles}\n🔁 Plan: {freq}',
+    sw: '*Lipa Mos Mos* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
+  },
+
+  LMM_ASK_AMOUNT: {
+    en: 'How much would you like to pay now? Enter a whole-shilling amount (KES 10 to {max}). Suggested: {suggested}.',
+    sw: 'Ungependa kulipa kiasi gani sasa? Ingiza kiasi cha shilingi kamili (KES 10 hadi {max}). Inapendekezwa: {suggested}.',
+  },
+
+  LMM_INVALID_AMOUNT: {
+    en: 'Please enter a whole-shilling amount between KES 10 and {max}.',
+    sw: 'Tafadhali ingiza kiasi cha shilingi kamili kati ya KES 10 na {max}.',
+  },
+
+  LMM_SUMMARY: {
+    en: '*Payment summary* 💳\n\n🏠 To your rent: {credit}\n➕ Fee ({pct}%): {fee}\n💵 You pay: {total}\n📱 M-Pesa number: {phone}\n\nTap *Confirm* to send the M-Pesa prompt.',
+    sw: '*Muhtasari wa malipo* 💳\n\n🏠 Kwa kodi yako: {credit}\n➕ Ada ({pct}%): {fee}\n💵 Unalipa: {total}\n📱 Namba ya M-Pesa: {phone}\n\nGusa *Thibitisha* kutuma ombi la M-Pesa.',
+  },
+
+  LMM_SENT: {
+    en: 'Check your phone for the M-Pesa prompt and enter your PIN. We will text you when it is received. 📲',
+    sw: 'Angalia simu yako kwa ombi la M-Pesa kisha weka PIN yako. Tutakutumia ujumbe likipokelewa. 📲',
+  },
+
+  LMM_UNAVAILABLE: {
+    en: '*Lipa Mos Mos* is not available right now.\n\n{reason}',
+    sw: '*Lipa Mos Mos* haipatikani kwa sasa.\n\n{reason}',
+  },
+
+  LMM_ERROR: {
+    en: 'We could not complete that: {reason}',
+    sw: 'Hatukuweza kukamilisha hilo: {reason}',
+  },
+
   PAY_SUMMARY: {
     en: '*Payment summary* 💳\n\n💰 Amount: {amount}\n📱 M-Pesa number: {phone}\n\nTap *Confirm* to send the M-Pesa prompt.',
     sw: '*Muhtasari wa malipo* 💳\n\n💰 Kiasi: {amount}\n📱 Namba ya M-Pesa: {phone}\n\nGusa *Thibitisha* kutuma ombi la M-Pesa.',
