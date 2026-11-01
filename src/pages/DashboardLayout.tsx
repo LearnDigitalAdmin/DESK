@@ -6,10 +6,8 @@ import {
   Loader2,
   AlertCircle,
   Smartphone,
-  Receipt,
   Banknote,
   CheckCircle,
-  MessageCircle,
   CreditCard,
   Briefcase,
   FileText,
@@ -51,7 +49,7 @@ const getInitials = (name: string): string => {
   }
 };
 
-type PaymentMode = 'mobile_money' | 'bank' | 'paybill' | 'till';
+type PaymentMode = 'mobile_money' | 'bank' | 'till';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('plot');
@@ -62,21 +60,13 @@ const Dashboard = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<PaymentMode>('mobile_money');
+  const settlementBank: SettlementType = selectedPaymentMode === 'bank' ? 'bank' : selectedPaymentMode === 'till' ? 'till' : 'mpesa';
   const [savingPaymentInfo, setSavingPaymentInfo] = useState(false);
 
-  const [bankName, setBankName] = useState('');
-  const [bankAccountNumber, setBankAccountNumber] = useState('');
-  const [bankAccountName, setBankAccountName] = useState('');
-  const [bankBranch, setBankBranch] = useState('');
 
-  const [paybillNumber, setPaybillNumber] = useState('');
-  const [paybillAccountName, setPaybillAccountName] = useState('');
 
-  const [tillNumber, setTillNumber] = useState('');
-  const [tillBusinessName, setTillBusinessName] = useState('');
 
   const [businessName, setBusinessName] = useState('');
-  const [settlementBank, setSettlementBank] = useState<SettlementType>('mpesa');
   const [bankCode, setBankCode] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [email, setEmail] = useState('');
@@ -108,8 +98,8 @@ const Dashboard = () => {
   const paymentModes = [
     {
       id: 'mobile_money' as PaymentMode,
-      name: 'Mobile Money',
-      description: 'M-Pesa & Airtel Money',
+      name: 'M-Pesa',
+      description: 'M-Pesa (Safaricom)',
       icon: Smartphone,
       color: 'bg-green-500',
       available: true
@@ -123,14 +113,6 @@ const Dashboard = () => {
       available: true
     },
     {
-      id: 'paybill' as PaymentMode,
-      name: 'Paybill',
-      description: 'M-Pesa Paybill',
-      icon: Receipt,
-      color: 'bg-purple-500',
-      available: true
-    },
-    {
       id: 'till' as PaymentMode,
       name: 'Buy Goods (Till)',
       description: 'M-Pesa Till Number',
@@ -139,78 +121,6 @@ const Dashboard = () => {
       available: true
     }
   ];
-
-  const handleRequestSetup = () => {
-    if (!firestoreUser) return;
-
-    let isValid = false;
-
-    switch (selectedPaymentMode) {
-      case 'bank':
-        isValid = !!(bankName && bankAccountNumber && bankAccountName);
-        break;
-      case 'paybill':
-        isValid = !!(paybillNumber && paybillAccountName);
-        break;
-      case 'till':
-        isValid = !!(tillNumber && tillBusinessName);
-        break;
-    }
-
-    if (!isValid) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
-    const message = generateWhatsAppMessage();
-    const whatsappNumber = '254791286165';
-    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${message}`;
-    
-    window.open(whatsappUrl, '_blank');
-  };
-
-  const generateWhatsAppMessage = () => {
-    if (!firestoreUser) return '';
-
-    let message = `*🏢 Plot Yangu Payment Setup Request*\n\n`;
-    message += `*Agent Details:*\n`;
-    message += `• Name: ${firestoreUser.name}\n`;
-    message += `• Email: ${firestoreUser.email}\n`;
-    message += `• Phone: ${firestoreUser.phone}\n`;
-    message += `• Agent ID: ${firestoreUser.id}\n\n`;
-
-    switch (selectedPaymentMode) {
-      case 'bank':
-        message += `*Payment Method:* Bank Account\n\n`;
-        message += `*Bank Details:*\n`;
-        message += `• Bank Name: ${bankName}\n`;
-        message += `• Account Number: ${bankAccountNumber}\n`;
-        message += `• Account Name: ${bankAccountName}\n`;
-        message += `• Branch: ${bankBranch || 'N/A'}\n`;
-        break;
-
-      case 'paybill':
-        message += `*Payment Method:* Paybill\n\n`;
-        message += `*Paybill Details:*\n`;
-        message += `• Paybill Number: ${paybillNumber}\n`;
-        message += `• Account Name: ${paybillAccountName}\n`;
-        break;
-
-      case 'till':
-        message += `*Payment Method:* Buy Goods (Till)\n\n`;
-        message += `*Till Details:*\n`;
-        message += `• Till Number: ${tillNumber}\n`;
-        message += `• Business Name: ${tillBusinessName}\n`;
-        break;
-
-      default:
-        return '';
-    }
-
-    message += `\n_Please setup my payment account for automated settlements._`;
-
-    return encodeURIComponent(message);
-  };
 
   const handleSavePaymentInfo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -538,7 +448,7 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {selectedPaymentMode === 'mobile_money' && (
+            {/* Automatic setup: M-Pesa (Safaricom), Till or Bank */}
               <form onSubmit={handleSavePaymentInfo} className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
                   <div className="flex items-start space-x-3">
@@ -546,7 +456,7 @@ const Dashboard = () => {
                     <div>
                       <p className="text-blue-900 font-semibold text-sm">Automated Setup Available</p>
                       <p className="text-blue-700 text-xs mt-1">
-                        Mobile money accounts can be setup automatically via Paystack integration.
+                        Your payout account is set up instantly. No WhatsApp or waiting needed.
                       </p>
                     </div>
                   </div>
@@ -568,7 +478,7 @@ const Dashboard = () => {
 
                 <SettlementFields
                   settlementBank={settlementBank}
-                  setSettlementBank={setSettlementBank}
+                  hideTypeSelect
                   bankCode={bankCode}
                   setBankCode={setBankCode}
                   accountNumber={accountNumber}
@@ -633,199 +543,7 @@ const Dashboard = () => {
                   )}
                 </button>
               </form>
-            )}
 
-            {selectedPaymentMode === 'bank' && (
-              <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-start space-x-3">
-                    <MessageCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-blue-900 font-semibold text-sm">Free Setup via WhatsApp</p>
-                      <p className="text-blue-700 text-xs mt-1">
-                        Submit your bank details and our team will set up your account for free within 24 hours.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Bank Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={bankName}
-                    onChange={(e) => setBankName(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., Equity Bank, KCB, Co-operative Bank"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Number <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={bankAccountNumber}
-                    onChange={(e) => setBankAccountNumber(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Your bank account number"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Holder Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={bankAccountName}
-                    onChange={(e) => setBankAccountName(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Name as it appears on the account"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Branch (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={bankBranch}
-                    onChange={(e) => setBankBranch(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., Nairobi CBD Branch"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRequestSetup}
-                  className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>Request Setup via WhatsApp</span>
-                </button>
-              </div>
-            )}
-
-            {selectedPaymentMode === 'paybill' && (
-              <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-start space-x-3">
-                    <MessageCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-blue-900 font-semibold text-sm">Free Setup via WhatsApp</p>
-                      <p className="text-blue-700 text-xs mt-1">
-                        Submit your paybill details and our team will configure automated settlements for free.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Paybill Number <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={paybillNumber}
-                    onChange={(e) => setPaybillNumber(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., 123456"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Your M-Pesa Paybill business number
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Account Name / Business Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={paybillAccountName}
-                    onChange={(e) => setPaybillAccountName(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Business name registered with the paybill"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRequestSetup}
-                  className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>Request Setup via WhatsApp</span>
-                </button>
-              </div>
-            )}
-
-            {selectedPaymentMode === 'till' && (
-              <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <div className="flex items-start space-x-3">
-                    <MessageCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-blue-900 font-semibold text-sm">Free Setup via WhatsApp</p>
-                      <p className="text-blue-700 text-xs mt-1">
-                        Submit your till details and we'll integrate it with automated payment splits.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Till Number <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={tillNumber}
-                    onChange={(e) => setTillNumber(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g., 123456"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Your M-Pesa Buy Goods till number
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Business Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={tillBusinessName}
-                    onChange={(e) => setTillBusinessName(e.target.value)}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Business name registered with the till"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRequestSetup}
-                  className="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
-                >
-                  <MessageCircle className="w-5 h-5" />
-                  <span>Request Setup via WhatsApp</span>
-                </button>
-              </div>
-            )}
           </div>
         </div>
       )}

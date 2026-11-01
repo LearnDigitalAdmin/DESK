@@ -42,7 +42,7 @@ export class Paystack{
 
   static async setupPaymentAccount(data: {
     businessName: string;
-    settlementBank: 'mpesa' | 'airtel-ke' | 'till' | 'bank';
+    settlementBank: 'mpesa' | 'till' | 'bank';
     bankCode?: string;
     accountNumber: string;
     email: string;
