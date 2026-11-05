@@ -1,3 +1,4 @@
+import { bundleSecret } from "./secretsBundle";
 /**
  * Landlord Watch configuration.
  * - LW_BOT_API_KEY: Secret Manager secret that already exists in plot-9fd6e. Bound to the WhatsApp webhook function.
@@ -5,9 +6,8 @@
  * - LW_MOCK=1 (env): use the in-memory mock instead of the backend.
  */
 
-import { defineSecret } from 'firebase-functions/params';
 
-export const LW_BOT_API_KEY = defineSecret('LW_BOT_API_KEY');
+export const LW_BOT_API_KEY = bundleSecret('LW_BOT_API_KEY');
 
 export const LW_DEFAULT_API_URL = 'https://africa-south1-plot-9fd6e.cloudfunctions.net/lwBotApi';
 

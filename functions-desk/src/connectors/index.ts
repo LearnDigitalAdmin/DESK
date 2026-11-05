@@ -3,12 +3,13 @@ import type {
   ResolveEntityIn, ResolveEntityOut, SyncPayoutAccountsIn, SyncPayoutAccountsOut, ValidateImportIn, ValidateImportOut,
 } from "../contract.js";
 import { DESK_COLLECTIONS } from "../contract.js";
-import { MYCHAMA_PAYSTACK_SECRET_KEY } from "../paystack/client.js";
+
 import { deskCallable } from "./common.js";
 import { defaultDeps } from "./deps.js";
 import { resolveEntity, validateImport } from "./resolve.js";
 import { syncPayoutAccounts } from "./payout.js";
 import { executePaidTicket } from "./tickets.js";
+import { BUNDLE_SECRETS } from "../kernel/secretsBundle.js";
 
 export const desk_resolveEntity = deskCallable<ResolveEntityIn, ResolveEntityOut>(
   { timeoutSeconds: 90 },
@@ -21,7 +22,7 @@ export const desk_validateImport = deskCallable<ValidateImportIn, ValidateImport
 );
 
 export const desk_syncPayoutAccounts = deskCallable<SyncPayoutAccountsIn, SyncPayoutAccountsOut>(
-  { secrets: [MYCHAMA_PAYSTACK_SECRET_KEY], timeoutSeconds: 120 },
+  { secrets: BUNDLE_SECRETS, timeoutSeconds: 120 },
   (uid) => syncPayoutAccounts(defaultDeps(), uid),
 );
 

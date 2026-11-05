@@ -4,9 +4,10 @@ import { DESK_REGION } from "../contract.js";
 import { col, getConfig } from "../db.js";
 import { paystackTransfers } from "../payouts/paystack.js";
 import { AUTO_PAYOUT_KINDS, payEntry, type PayoutDeps } from "../payouts/payout.js";
-import { PAYSTACK_SECRET_KEY } from "../paystack/client.js";
+
 import { monthOf, prevMonth } from "../network/pure.js";
 import { closeMonth } from "./close.js";
+import { BUNDLE_SECRETS } from "../kernel/secretsBundle.js";
 
 const deps = (): PayoutDeps => ({ now: () => Date.now(), getConfig, transfers: paystackTransfers });
 
@@ -21,7 +22,7 @@ export const desk_closeMonth = onSchedule(
  * Rows the cap or a transient failure leaves behind are simply retried the next day. Bonus and support payouts stay manual.
  */
 export const desk_autoPayout = onSchedule(
-  { schedule: "0 9 * * *", timeZone: "Africa/Nairobi", region: DESK_REGION, secrets: [PAYSTACK_SECRET_KEY], timeoutSeconds: 540, memory: "256MiB" },
+  { schedule: "0 9 * * *", timeZone: "Africa/Nairobi", region: DESK_REGION, secrets: BUNDLE_SECRETS, timeoutSeconds: 540, memory: "256MiB" },
   async () => {
     const d = deps(); const cfg = await d.getConfig();
     const snap = await col("ledger").where("kind", "in", AUTO_PAYOUT_KINDS as string[]).where("status", "==", "payable").orderBy("createdAt").limit(100).get();

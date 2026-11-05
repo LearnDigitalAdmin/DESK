@@ -1,13 +1,13 @@
+import { bundleSecret } from "./secretsBundle";
 /**
  * WhatsApp Configuration
  * Stores WhatsApp API credentials and settings
  */
 
-import { defineSecret } from 'firebase-functions/params';
 
-export const WHATSAPP_PHONE_NUMBER_ID = defineSecret('WHATSAPP_PHONE_NUMBER_ID');
-export const WHATSAPP_ACCESS_TOKEN = defineSecret('WHATSAPP_ACCESS_TOKEN');
-export const WHATSAPP_VERIFY_TOKEN = defineSecret('WHATSAPP_VERIFY_TOKEN');
+export const WHATSAPP_PHONE_NUMBER_ID = bundleSecret('WHATSAPP_PHONE_NUMBER_ID');
+export const WHATSAPP_ACCESS_TOKEN = bundleSecret('WHATSAPP_ACCESS_TOKEN');
+export const WHATSAPP_VERIFY_TOKEN = bundleSecret('WHATSAPP_VERIFY_TOKEN');
 
 export const WHATSAPP_CONFIG = {
   API_VERSION: 'v24.0',

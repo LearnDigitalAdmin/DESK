@@ -5,15 +5,15 @@
  * HostPinnacle's SMSApi/send expects FORM-ENCODED fields (a JSON body is not parsed), as Chama's client documents.
  */
 import axios from "axios";
-import { defineSecret } from "firebase-functions/params";
 import { DeskError } from "../errors.js";
 import { normalizeKenyaPhone } from "../paystack/phone.js";
+import { BUNDLE_SECRETS, bundleSecret } from "./secretsBundle.js";
 
-export const HP_USERID = defineSecret("HP_SMS_USERID");
-export const HP_PASSWORD = defineSecret("HP_SMS_PASSWORD");
-export const HP_APIKEY = defineSecret("HP_SMS_APIKEY");
-export const HP_SENDER_ID = defineSecret("HP_SMS_SENDERID");
-export const HP_SECRETS = [HP_USERID, HP_PASSWORD, HP_APIKEY, HP_SENDER_ID];
+export const HP_USERID = bundleSecret("HP_SMS_USERID");
+export const HP_PASSWORD = bundleSecret("HP_SMS_PASSWORD");
+export const HP_APIKEY = bundleSecret("HP_SMS_APIKEY");
+export const HP_SENDER_ID = bundleSecret("HP_SMS_SENDERID");
+export const HP_SECRETS = BUNDLE_SECRETS;
 
 export const SMS_API_URL = "https://smsportal.hostpinnacle.co.ke/SMSApi/send";
 export const SMS_MAX_LENGTH = 385;
