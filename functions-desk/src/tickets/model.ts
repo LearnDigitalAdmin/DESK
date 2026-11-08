@@ -5,7 +5,7 @@
 import type { QuoteBreakdownLine, Scope, ServiceType } from "../contract.js";
 import type { TicketDoc } from "../types.js";
 
-export const SERVICE_TYPES: readonly ServiceType[] = ["import_excel", "manual_entry", "schedule_setup", "bulk_reminder"];
+export const SERVICE_TYPES: readonly ServiceType[] = ["import_excel", "manual_entry", "schedule_setup", "bulk_reminder", "compliance_report"];
 
 /** The session scope each service needs (bulk_reminder uses the schedule scope; its per-action OTP is a separate gate). */
 export const SERVICE_SCOPE: Readonly<Record<ServiceType, Scope>> = {
@@ -13,7 +13,9 @@ export const SERVICE_SCOPE: Readonly<Record<ServiceType, Scope>> = {
   manual_entry: "manual_entry",
   schedule_setup: "schedule",
   bulk_reminder: "schedule",
+  compliance_report: "report",
 };
+export const COMPLIANCE_REPORT_TYPES = ["mri_monthly", "annual_summary"] as const;
 
 /** Largest row / record count a quote accepts. */
 export const MAX_QUOTE_COUNT = 100_000;

@@ -6,6 +6,7 @@ import { audit } from "../kernel/audit.js";
 import { requireSession } from "../kernel/session.js";
 import { resolveDeps, type DeskDeps } from "../charge/port.js";
 import { measureBulkReminder } from "./bulk.js";
+import { previewComplianceReport } from "./complianceReport.js";
 import { SERVICE_SCOPE, type DeskTicket } from "./model.js";
 import { parseParams, parseQuoteEnvelope, priceService, type BulkMeasure } from "./quote.js";
 
@@ -25,6 +26,13 @@ export async function quoteService(uid: string, data: unknown, deps: DeskDeps = 
       audience: params.audience as string, message: params.message as string, delegate: d.delegate,
     });
     bulk = { recipients: m.recipients, credits: m.credits };
+  }
+  if (env.serviceType === "compliance_report") {
+    // Plot Yangu only, and only when the property has synced records: nobody should pay for a report that cannot be made.
+    await previewComplianceReport({
+      cfg, product: ctx.product, entityKey: ctx.entityKey, agentCode: agent.agentCode,
+      reportType: String(params.reportType), propertyId: String(params.propertyId), month: String(params.month), delegate: d.delegate,
+    });
   }
   const { lines, amountMinor } = priceService(env.serviceType, params, cfg, bulk);
 

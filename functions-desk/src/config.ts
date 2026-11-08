@@ -28,6 +28,8 @@ export interface DeskConfig {
     manualCapMinor: number;              // 100000
     manualServiceFeeMinor: number;       // 20000
     commsMinor: number;                  // 10000
+    complianceReportMinor: number;       // 20000 = KES 200 per compliance report (MRI / annual summary), never free on desk
+    reportPlatformPct: number;           // 15: Samuhia's cut of a compliance report, on top of Paystack's 1.5%; the agent keeps the rest (83.5%)
   };
   network: NetworkConfig;
   incentives: IncentiveConfig;
@@ -98,6 +100,8 @@ export const DEFAULT_DESK_CONFIG: DeskConfig = {
     manualCapMinor: 100000,
     manualServiceFeeMinor: 20000,
     commsMinor: 10000,
+    complianceReportMinor: 20000,
+    reportPlatformPct: 15,
   },
   network: {
     seniorsPerWard: 4, leadsPerConstituency: 3, invitesPerDay: 20, inviteTtlDays: 7,

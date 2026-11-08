@@ -43,7 +43,7 @@ export type LedgerStatus = "settled" | "payable" | "processing" | "paid" | "void
 /** `network` = one row per agent per month: team overrides + automatic retention/activity incentives, paid automatically by Paystack transfer. */
 export type LedgerKind = "service" | "commission" | "bonus" | "support" | "reversal" | "network";
 export type ServiceType =
-  | "import_excel" | "manual_entry" | "schedule_setup" | "bulk_reminder";
+  | "import_excel" | "manual_entry" | "schedule_setup" | "bulk_reminder" | "compliance_report";
 export type Scope =
   | "read" | "import" | "manual_entry" | "schedule" | "bulk_sms" | "report"
   | "export" | "rent_stk";
@@ -94,7 +94,8 @@ export interface ValidateImportOut { valid: ImportRow[]; errors: ImportError[] }
 
 export interface QuoteServiceIn {
   sessionId: string; serviceType: ServiceType;
-  /** import_excel: {rowCount}; manual_entry: {recordCount}; schedule_setup: {}; bulk_reminder: {audience, message} */
+  /** import_excel: {rowCount}; manual_entry: {recordCount}; schedule_setup: {}; bulk_reminder: {audience, message};
+   *  compliance_report: {reportType: "mri_monthly" | "annual_summary", propertyId, month: "YYYY-MM"} (Plot Yangu only, always paid) */
   params: Record<string, number | string>;
 }
 export interface QuoteBreakdownLine { label: string; amountMinor: number }
@@ -255,7 +256,7 @@ export const summaryExport = (kind: string): string => `Export ${kind}`;
  */
 export type DelegateAction =
   | "entity_info" | "validate_records" | "commit_records"
-  | "schedule_sms" | "send_sms_now" | "run_report" | "export_data" | "list_tenants";
+  | "schedule_sms" | "send_sms_now" | "run_report" | "export_data" | "list_tenants" | "compliance_report";
 export interface DelegateRequest {
   action: DelegateAction;
   entityCode: string;          // SMC-0042 | KNEC code | PYL-0007
@@ -322,6 +323,7 @@ export interface DeskCallableMap {
   desk_top_setRank: { in: TopSetRankIn; out: TopSetRankOut };
   desk_top_listPayables: { in: TopListPayablesIn; out: TopListPayablesOut };
   desk_top_payout: { in: TopPayoutIn; out: TopPayoutOut };
+  desk_reportProperties: { in: ReportPropertiesIn; out: ReportPropertiesOut };
   desk_getEntityInfo: { in: GetEntityInfoIn; out: GetEntityInfoOut };
   desk_runReport: { in: RunReportIn; out: RunReportOut };
   desk_exportData: { in: ExportDataIn; out: ExportDataOut };
@@ -343,7 +345,7 @@ export const DESK_CALLABLES = [
   "desk_listRequests", "desk_updateRequest", "desk_createRequest",
   "desk_top_requestOtp", "desk_top_listDesks", "desk_top_getDesk", "desk_top_getDoc",
   "desk_top_setDeskStatus", "desk_top_setRank", "desk_top_listPayables", "desk_top_payout",
-  "desk_getEntityInfo", "desk_runReport", "desk_exportData", "desk_listTenants",
+  "desk_getEntityInfo", "desk_runReport", "desk_exportData", "desk_listTenants", "desk_reportProperties",
   "desk_net_options", "desk_net_invite", "desk_net_decide", "desk_net_team", "desk_net_dashboard",
 ] as const;
 
@@ -393,6 +395,10 @@ export const DESK_COLLECTIONS = {
  * Entity info reaches the UI ONLY through desk_getEntityInfo, which needs an active, OTP-verified session with scope "read".
  * ResolveEntityOut deliberately carries none of it: resolve runs before any session or grant.
  */
+/** scope "report". The customer's Plot Yangu properties, to choose which one a compliance report is for (a paid ticket: desk_quoteService). */
+export interface ReportPropertiesIn { sessionId: string }
+export interface ReportPropertiesOut { properties: { id: string; name: string }[] }
+
 export interface GetEntityInfoIn { sessionId: string }
 export interface GetEntityInfoOut {
   plan: string; creditsBalance: number; audiences: string[]; reportTypes: string[]; exportKinds: string[];

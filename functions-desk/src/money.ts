@@ -40,6 +40,24 @@ export function servicePlan(cfg: DeskConfig): SplitPlan {
   return { agentSharePct: floorPct2(100 - cfg.platformCutPct), rule: "service" };
 }
 
+/**
+ * Compliance report (MRI working paper / annual summary): the agent keeps the price less Paystack (1.5%) less the platform cut (15%) =
+ * 83.5% of the price (KES 167.00 of KES 200). Charges use a Paystack percentage split with the fee shared proportionally, so the
+ * agent's share of what Paystack settles is (price - fee - platform) / (price - fee), rounded DOWN (an agent is never overpaid).
+ */
+export function complianceReportPlan(grossMinor: number, cfg: DeskConfig): SplitPlan {
+  assertMinor(grossMinor, "gross");
+  const fee = Math.round((grossMinor * cfg.expectedPaystackFeePct) / 100);
+  const platform = pctHalfUp(grossMinor, cfg.prices.reportPlatformPct);
+  const base = grossMinor - fee;
+  if (base <= platform) return { agentSharePct: 0, rule: "service" };
+  return { agentSharePct: floorPct2(((base - platform) / base) * 100), rule: "service" };
+}
+/** The split for any desk service ticket. Compliance reports have their own; everything else keeps the flat platform cut. */
+export function planForService(serviceType: string, grossMinor: number, cfg: DeskConfig): SplitPlan {
+  return serviceType === "compliance_report" ? complianceReportPlan(grossMinor, cfg) : servicePlan(cfg);
+}
+
 // -------------------------------------------------- C. subscriptions and reports
 export function sharePlan(rank: Rank, kind: "subscription" | "report", cfg: DeskConfig): SplitPlan {
   const pct = (kind === "subscription" ? cfg.subShareByRank : cfg.reportShareByRank)[rank];
@@ -103,6 +121,7 @@ export function settledAmounts(p: { grossMinor: number; feeMinor: number; agentS
 // -------------------------------------------------- service prices (customer pays, agent keeps all but the cut)
 export const importPrice = (cfg: DeskConfig): number => cfg.prices.importMinor;
 export const commsPrice = (cfg: DeskConfig): number => cfg.prices.commsMinor;
+export const complianceReportPrice = (cfg: DeskConfig): number => cfg.prices.complianceReportMinor;
 export function manualEntryPrice(records: number, cfg: DeskConfig):
   { tierMinor: number; serviceFeeMinor: number; totalMinor: number } {
   if (!Number.isInteger(records) || records < 1) throw new RangeError("records must be a positive integer");

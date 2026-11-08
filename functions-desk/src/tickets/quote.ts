@@ -2,8 +2,8 @@
 import type { DeskConfig } from "../config.js";
 import type { QuoteBreakdownLine, ServiceType } from "../contract.js";
 import { DeskError } from "../errors.js";
-import { commsPrice, importPrice, manualEntryPrice } from "../money.js";
-import { BULK_MESSAGE_MAX, MAX_AUDIENCE_LENGTH, MAX_QUOTE_COUNT, SERVICE_TYPES } from "./model.js";
+import { commsPrice, complianceReportPrice, importPrice, manualEntryPrice } from "../money.js";
+import { BULK_MESSAGE_MAX, COMPLIANCE_REPORT_TYPES, MAX_AUDIENCE_LENGTH, MAX_QUOTE_COUNT, SERVICE_TYPES } from "./model.js";
 
 const bad = (message: string): DeskError => new DeskError("invalid_argument", message);
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -43,6 +43,16 @@ export function parseParams(serviceType: ServiceType, raw: Record<string, unknow
     case "schedule_setup":
       rejectExtra(raw, [], "a schedule setup");
       return {};
+    case "compliance_report": {
+      rejectExtra(raw, ["reportType", "propertyId", "month"], "a compliance report");
+      const reportType = typeof raw.reportType === "string" ? raw.reportType : "";
+      if (!(COMPLIANCE_REPORT_TYPES as readonly string[]).includes(reportType)) throw bad("Choose a report type");
+      const propertyId = typeof raw.propertyId === "string" ? raw.propertyId.trim() : "";
+      if (propertyId.length < 1 || propertyId.length > 60) throw bad("Choose a property");
+      const month = typeof raw.month === "string" ? raw.month.trim() : "";
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month < "2016-01") throw bad("Choose a valid month");
+      return { reportType, propertyId, month };
+    }
     case "bulk_reminder": {
       rejectExtra(raw, ["audience", "message"], "a bulk reminder");
       const audience = typeof raw.audience === "string" ? raw.audience.trim() : "";
@@ -78,6 +88,9 @@ export function priceService(
     }
     case "schedule_setup":
       lines = [{ label: "Schedule setup", amountMinor: commsPrice(cfg) }];
+      break;
+    case "compliance_report":
+      lines = [{ label: `${params.reportType === "annual_summary" ? "Annual rental income summary" : "MRI working paper"} (${params.month})`, amountMinor: complianceReportPrice(cfg) }];
       break;
     case "bulk_reminder": {
       if (!bulk) throw new DeskError("internal", "Recipient count is missing for a bulk reminder");

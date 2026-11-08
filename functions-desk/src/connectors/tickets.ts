@@ -35,7 +35,7 @@ const str = (v: unknown): v is string => typeof v === "string" && v.trim().lengt
 const incomplete = () => new DeskError("invalid_argument", "The saved request is incomplete, so it could not be run. Please contact support.");
 
 /** service type -> delegate action + payload. import/manual -> commit_records, schedule -> schedule_sms, reminder -> send_sms_now. Pure. */
-export function buildDelegateCall(serviceType: ServiceType, draft: Record<string, unknown>): DelegateCall {
+export function buildDelegateCall(serviceType: ServiceType, draft: Record<string, unknown>, ticket?: { ticketId: string; params: Record<string, number | string> }): DelegateCall {
   switch (serviceType) {
     case "import_excel":
     case "manual_entry": {
@@ -63,6 +63,12 @@ export function buildDelegateCall(serviceType: ServiceType, draft: Record<string
       // dryRun is forced off: the customer already approved the send with their per-action OTP at charge time.
       const payload: DelegateSendPayload = { message: draft.message as string, audience: draft.audience as string, ...(memberIds ? { memberIds } : {}), dryRun: false };
       return { action: "send_sms_now", payload: { ...payload } };
+    }
+    case "compliance_report": {
+      // Everything needed was validated at quote time and lives on the ticket (params), not in a draft. Only reached for a PAID ticket.
+      const p = ticket?.params;
+      if (!p || !str(p.reportType) || !str(p.propertyId) || !str(p.month) || !ticket?.ticketId) throw incomplete();
+      return { action: "compliance_report", payload: { reportType: p.reportType, propertyId: p.propertyId, month: p.month, ticketId: ticket.ticketId, dryRun: false } };
     }
     default:
       throw incomplete();
@@ -119,7 +125,7 @@ export async function executePaidTicket(deps: Deps, ticketId: string): Promise<E
   try {
     const chunkSnap = await col("tickets").doc(ticketId).collection("draft").get();
     const chunks = chunkSnap.docs.sort((a, b) => (a.id < b.id ? -1 : 1)).map((d) => d.data());
-    call = buildDelegateCall(ticket.serviceType, assembleDraft(ticket.draft, chunks));
+    call = buildDelegateCall(ticket.serviceType, assembleDraft(ticket.draft, chunks), { ticketId, params: (ticket as { params?: Record<string, number | string> }).params ?? {} });
     entity = parseEntityKey(ticket.entityKey);
   } catch (err) {
     return fail(err instanceof DeskError ? err.message : "The saved request could not be read. Please contact support.");

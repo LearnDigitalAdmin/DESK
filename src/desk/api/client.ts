@@ -12,7 +12,7 @@ import type {
   UpdateRequestIn, UploadDocIn,
   ApplyAgentIn, ChargeTicketIn, DeskCallableMap, DeskCallableName, EndSessionIn, GetEarningsIn,
   ConfirmSupportIn, InitiateRentStkIn, LogSupportIn, QuoteServiceIn, RequestAccessIn, RequestActionOtpIn,
-  ResolveEntityIn, SaveDraftIn, ValidateImportIn, VerifyAccessIn, VerifyActionOtpIn,
+  ReportPropertiesIn, ResolveEntityIn, SaveDraftIn, ValidateImportIn, VerifyAccessIn, VerifyActionOtpIn,
 } from "./contract";
 
 export class DeskApiError extends Error {
@@ -60,6 +60,7 @@ export const deskApi = {
   endSession: (i: EndSessionIn) => callDesk("desk_endSession", i),
   validateImport: (i: ValidateImportIn) => callDesk("desk_validateImport", i),
   quoteService: (i: QuoteServiceIn) => callDesk("desk_quoteService", i),
+  reportProperties: (i: ReportPropertiesIn) => callDesk("desk_reportProperties", i),
   saveDraft: (i: SaveDraftIn) => callDesk("desk_saveDraft", i),
   chargeTicket: (i: ChargeTicketIn) => callDesk("desk_chargeTicket", i),
   initiateRentStk: (i: InitiateRentStkIn) => callDesk("desk_initiateRentStk", i),

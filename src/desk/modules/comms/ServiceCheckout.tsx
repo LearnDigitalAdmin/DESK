@@ -4,7 +4,7 @@ import { Badge, Card, FormField, buttonClass, inputClass } from "../../ui";
 import { ActionOtpDialog } from "./lib/access";
 import { messageOf } from "./lib/messages";
 import { phoneProblem, sanitizePhoneInput, PHONE_MAX_INPUT_LENGTH } from "../../access/phone";
-import { useTicketDoc } from "./useTicketDoc";
+import { useTicketDoc, type TicketLiveView } from "./useTicketDoc";
 
 const isKenyanPhone = (v: string): boolean => phoneProblem(v) === null;
 
@@ -20,11 +20,13 @@ interface Props {
   /** Bulk reminders need the customer's approval for exactly this many recipients. */
   otpSummary?: (recipients: number) => string;
   doneText: string;
+  /** Shown once the service is done, in place of the plain text (a compliance report shows its download here). */
+  doneContent?: (ticket: TicketLiveView) => ReactNode;
   onReset: () => void;
 }
 
 /** Review the price, save the draft, get the customer's OTP when the action needs one, charge, then follow the ticket live. */
-export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, otpSummary, doneText, onReset }: Props) {
+export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, otpSummary, doneText, doneContent, onReset }: Props) {
   const live = useTicketDoc(quote.ticketId);
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,7 +44,7 @@ export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, o
   }
   const { ticket } = live;
 
-  if (ticket.status !== "draft") return <Tracking status={ticket.status} reason={ticket.failureReason} reference={ticket.paystackRef} doneText={doneText} onReset={onReset} />;
+  if (ticket.status !== "draft") return <Tracking status={ticket.status} reason={ticket.failureReason} reference={ticket.paystackRef} doneText={doneText} done={doneContent ? doneContent(ticket) : null} onReset={onReset} />;
 
   const recipients = ticket.recipients;
   const needsRecipients = otpSummary !== undefined;
@@ -100,8 +102,8 @@ export function ServiceCheckout({ sessionId, quote, label, details, saveDraft, o
   );
 }
 
-function Tracking({ status, reason, reference, doneText, onReset }: {
-  status: string; reason?: string; reference?: string; doneText: string; onReset: () => void;
+function Tracking({ status, reason, reference, doneText, done, onReset }: {
+  status: string; reason?: string; reference?: string; doneText: string; done: ReactNode; onReset: () => void;
 }) {
   const view =
     status === "awaiting_payment" ? { tone: "amber" as const, title: "Waiting for your payment", body: "Check your phone for the M-PESA prompt and enter your PIN." }
@@ -115,6 +117,7 @@ function Tracking({ status, reason, reference, doneText, onReset }: {
       <div className="min-w-0 space-y-3" role="status" aria-live="polite">
         <Badge tone={view.tone}>{view.title}</Badge>
         <p className="break-words text-sm text-gray-800">{view.body}</p>
+        {status === "committed" && done}
         {reference && <p className="break-all text-xs text-gray-500">Reference: {reference}</p>}
         {finished && <button type="button" className={buttonClass.primary} onClick={onReset}>{status === "committed" ? "Start another" : "Start again"}</button>}
       </div>

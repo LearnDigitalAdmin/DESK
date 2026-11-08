@@ -20,7 +20,7 @@ import { DeskError } from "../errors.js";
 import { getAgentPayment, requireActiveAgent } from "../kernel/agents.js";
 import { audit } from "../kernel/audit.js";
 import { ACTION_OTP_FRESH_MS, requireSession } from "../kernel/session.js";
-import { servicePlan } from "../money.js";
+import { planForService } from "../money.js";
 import { maskPhone, normalizeKenyaPhone } from "../paystack/phone.js";
 import { settleTicketReference } from "../ledger/settle.js";
 import { measureBulkReminder } from "../tickets/bulk.js";
@@ -189,7 +189,7 @@ export async function chargeTicket(uid: string, data: unknown, deps: DeskDeps = 
 
   // 4. payout subaccount (desk services always charge in the MAIN Paystack account) and the split
   const pay = await getAgentPayment(uid, "main", cfg);
-  const plan = servicePlan(cfg);
+  const plan = planForService(t.serviceType, t.amountMinor, cfg);
   const splitCode = await d.port.getOrCreateSplitCode([{ subaccount: pay.subaccountCode, sharePct: plan.agentSharePct }], "service");
 
   // 5. reserve
@@ -207,7 +207,7 @@ export async function chargeTicket(uid: string, data: unknown, deps: DeskDeps = 
   }
 
   // 7. the transaction record first (PAY's webhook needs it to exist), then Paystack
-  const facts = { pay, ticket: { ...t, sharePct: plan.agentSharePct }, reference, phoneE164, splitCode, commissionRate: cfg.platformCutPct };
+  const facts = { pay, ticket: { ...t, sharePct: plan.agentSharePct }, reference, phoneE164, splitCode, commissionRate: t.serviceType === "compliance_report" ? cfg.prices.reportPlatformPct : cfg.platformCutPct };
   const txRef = db().collection(CYBER_TRANSACTIONS).doc(reference);
   try {
     await txRef.create(buildCyberTransaction(facts));

@@ -188,6 +188,16 @@ const Dashboard = () => {
     }
   };
 
+  // One list drives both the desktop icon group and the phone strip, so nothing can be hidden on a small screen.
+  const toolbar = [
+    { key: 'desk', title: 'Desk', Icon: Headset, onClick: () => navigate('/desk'), aria: 'Open Samuhia Desk' },
+    { key: 'services', title: 'Services', Icon: Briefcase, onClick: () => navigate('/services'), aria: 'Services' },
+    { key: 'form', title: 'Form', Icon: FileText, onClick: () => navigate('/form'), aria: 'Form' },
+    { key: 'passports', title: 'Passports', Icon: ImagePlay, onClick: () => setShowPassport(!showPassport), aria: 'Passports' },
+    { key: 'img-pdf', title: 'IMG-PDF', Icon: FileArchive, onClick: () => setShowI2P(!showI2P), aria: 'Images to PDF' },
+    { key: 'settings', title: 'Settings', Icon: Settings, onClick: () => setShowPaymentSettings(!showPaymentSettings), aria: 'Payment settings' },
+  ];
+
   const tabs = [
     { id: 'plot', label: 'Plot Yangu', icon: <Building2 className="w-4 h-4" /> },
     { id: 'cyber', label: 'Desk Services', icon: <Printer className="w-4 h-4" /> },
@@ -197,61 +207,25 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800">
-      <header className="fixed top-0 left-0 right-0 bg-gray-900/30 backdrop-blur-md border-b border-gray-700/30 z-40">
+      {/* One sticky block (header, phone toolbar, tabs): its height can change without anything being covered or cut off. */}
+      <div className="sticky top-0 z-40">
+      <header className="bg-gray-900/80 backdrop-blur-md border-b border-gray-700/30">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 py-3">
-          <div className="flex items-center justify-between">
-            <div onClick={() => navigate('/')} className="flex-shrink-0">
+          <div className="flex items-center justify-between gap-3">
+            <div onClick={() => navigate('/')} className="flex-shrink-0 cursor-pointer">
               <h1 className="text-lg sm:text-xl font-bold text-white">
                 Samuhia <span className="text-cyan-400">Desk</span>
               </h1>
               <p className="text-xs text-gray-400 hidden sm:block">Dashboard Overview</p>
             </div>
 
-            {/* Center Navigation Icons */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => navigate('/desk')}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="Desk"
-                aria-label="Open Samuhia Desk"
-              >
-                <Headset className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => navigate('/services')}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="Services"
-              >
-                <Briefcase className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => navigate('/form')}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="Form"
-              >
-                <FileText className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setShowPassport(!showPassport)}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="Passports"
-              >
-                <ImagePlay className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setShowI2P(!showI2P)}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="IMG-PDF"
-              >
-                <FileArchive className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setShowPaymentSettings(!showPaymentSettings)}
-                className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400"
-                title="Payment Settings"
-              >
-                <Settings className="w-5 h-5" />
-              </button>
+            {/* Desktop: icon group in the middle. Phones get the scrollable strip below the header. */}
+            <div className="hidden sm:flex items-center gap-3 lg:gap-4">
+              {toolbar.map((b) => (
+                <button key={b.key} onClick={b.onClick} className="p-2 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition-colors text-gray-300 hover:text-cyan-400" title={b.title} aria-label={b.aria}>
+                  <b.Icon className="w-5 h-5" />
+                </button>
+              ))}
             </div>
 
             <div className="hidden sm:block flex-shrink-0">
@@ -259,9 +233,9 @@ const Dashboard = () => {
             </div>
 
             {/* Profile Section */}
-            <div onClick={() => setShowPaymentSettings(!showPaymentSettings)} className="flex items-center gap-2 sm:gap-3 cursor-pointer flex-shrink-0">
-              <div className="text-right">
-                <div className="text-xs sm:text-sm font-medium text-white">
+            <div onClick={() => setShowPaymentSettings(!showPaymentSettings)} className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0">
+              <div className="text-right min-w-0">
+                <div className="text-xs sm:text-sm font-medium text-white truncate max-w-[9.5rem] sm:max-w-none">
                   {firestoreUser?.pId || 'COG-0000-12345'}
                 </div>
                 <div className="text-xs text-gray-400 hidden sm:block">
@@ -301,8 +275,20 @@ const Dashboard = () => {
         </div>
       </header> */}
 
-      {/* Fixed Tabs Navigation */}
-      <div className="bg-gray-900/30 backdrop-blur-md border-b border-gray-800/50 fixed top-[73px] sm:top-[81px] left-0 right-0 z-40">
+      {/* Phones: every tool in one swipeable row, with labels (the icons alone did not fit) */}
+      <div className="sm:hidden bg-gray-900/80 backdrop-blur-md border-b border-gray-800/50">
+        <div className="flex items-center gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="toolbar" aria-label="Tools">
+          {toolbar.map((b) => (
+            <button key={b.key} onClick={b.onClick} aria-label={b.aria} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gray-700/30 px-3 py-2 text-xs font-medium text-gray-200 active:bg-gray-700/60">
+              <b.Icon className="w-4 h-4" /><span>{b.title}</span>
+            </button>
+          ))}
+          <div className="shrink-0"><InstallButton tone="onDark" /></div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="bg-gray-900/80 backdrop-blur-md border-b border-gray-800/50">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6">
           {/* Mobile: Full width distribution */}
           <nav className="flex sm:hidden">
@@ -310,14 +296,14 @@ const Dashboard = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex flex-col items-center justify-center gap-1 py-3 font-medium text-xs transition-all border-b-2 ${
+                className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-2.5 font-medium text-[11px] transition-all border-b-2 ${
                   activeTab === tab.id
                     ? 'border-cyan-500 text-cyan-400 bg-cyan-500/10'
                     : 'border-transparent text-gray-400'
                 }`}
               >
                 {tab.icon}
-                <span>{tab.label.split(' ')[0]}</span>
+                <span className="max-w-full truncate px-0.5">{tab.label.split(' ')[0]}</span>
               </button>
             ))}
           </nav>
@@ -341,8 +327,9 @@ const Dashboard = () => {
           </nav>
         </div>
       </div>
+      </div>
 
-      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-[120px] sm:pt-[128px] pb-24 sm:pb-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-4 sm:pt-6 pb-24 sm:pb-8">
         {activeTab === 'plot' && <PlotTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'cyber' && <CyberTab onOpenTerminal={handleOpenTerminal} />}
         {activeTab === 'income' && <IncomeTab />}
