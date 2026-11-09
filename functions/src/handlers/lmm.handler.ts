@@ -22,11 +22,20 @@ const BASE = process.env.PAY_FUNCTIONS_BASE || 'https://africa-south1-plot-9fd6e
 const MAX_KES = 150000;
 const MIN_KES = 10;
 
-interface PlanView { frequency: Frequency; targetMinor: number; creditedMinor: number; remainingMinor: number; pct: number; settlesOn: string; suggestedMinor: number }
+/** Set by PAY while the plan holds under KES 300: what a payout will cost the tenant, or that it is too small to send. */
+type Payout =
+  | { kind: 'fee_from_rent'; creditedMinor: number; feeMinor: number; netMinor: number; thresholdMinor: number }
+  | { kind: 'too_small'; creditedMinor: number; minMinor: number; thresholdMinor: number };
+interface PlanView { frequency: Frequency; targetMinor: number; creditedMinor: number; remainingMinor: number; pct: number; settlesOn: string; dueOn?: string | null; suggestedMinor: number; payout?: Payout | null }
 interface PlanRes { available: boolean; reason?: string; plan?: PlanView | null; targetMinor?: number; settlesOn?: string; suggestedMinor?: number }
 
 const kes = (minor: number): string => `KES ${(minor / 100).toLocaleString('en-KE', { maximumFractionDigits: 2 })}`;
 const kesWhole = (n: number): string => `KES ${n.toLocaleString('en-KE')}`;
+/** "2026-11-05" -> "5 Nov 2026" (anything else is shown as it came). */
+const niceDate = (iso?: string | null): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : iso || '';
+};
 /** Same rule PAY applies (it recomputes and verifies it): 5% under KES 100, otherwise 2.5%, rounded up to a whole shilling. Preview only. */
 export const previewCharge = (credit: number): { total: number; fee: number; pct: string } => {
   const bps = credit < 100 ? 500 : 250;
@@ -55,14 +64,23 @@ const freqLabel = (f: Frequency, lang: Lang) => ulabel(f === 'daily' ? 'DAILY' :
 
 const freqScreen = (lang: Lang, res: PlanRes): Outbound =>
   uiList(
-    getMessage('LMM_INTRO', lang, { due: kes(res.plan?.targetMinor ?? res.targetMinor ?? 0), settles: res.settlesOn ?? res.plan?.settlesOn ?? '' }),
+    getMessage('LMM_INTRO', lang, { due: kes(res.plan?.targetMinor ?? res.targetMinor ?? 0), settles: niceDate(res.settlesOn ?? res.plan?.settlesOn) }),
     ulabel('LIST_BUTTON', lang),
     [row('daily', ulabel('DAILY', lang)), row('weekly', ulabel('WEEKLY', lang)), row('biweekly', ulabel('BIWEEKLY', lang)), row('0', ulabel('BACK', lang)), row('#', ulabel('MAIN', lang))],
   );
 
+/** The warning under the status when the plan holds under KES 300 (the fee that will come off, or too little to send). Empty otherwise. */
+const payoutNote = (lang: Lang, n?: Payout | null): string => {
+  if (!n) return '';
+  const threshold = String(n.thresholdMinor / 100);
+  return '\n\n' + (n.kind === 'fee_from_rent'
+    ? getMessage('LMM_NOTE_FEE', lang, { threshold, fee: kes(n.feeMinor), net: kes(n.netMinor), credited: kes(n.creditedMinor) })
+    : getMessage('LMM_NOTE_TOO_SMALL', lang, { threshold, min: kes(n.minMinor), credited: kes(n.creditedMinor) }));
+};
+
 const statusScreen = (lang: Lang, plan: PlanView): Outbound =>
   uiButtons(
-    getMessage('LMM_STATUS', lang, { paid: kes(plan.creditedMinor), due: kes(plan.targetMinor), pct: String(plan.pct), balance: kes(plan.remainingMinor), settles: plan.settlesOn, freq: freqLabel(plan.frequency, lang) }),
+    getMessage('LMM_STATUS', lang, { paid: kes(plan.creditedMinor), due: kes(plan.targetMinor), pct: String(plan.pct), balance: kes(plan.remainingMinor), settles: niceDate(plan.settlesOn), freq: freqLabel(plan.frequency, lang) }) + payoutNote(lang, plan.payout),
     [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('FREQ', ulabel('CHANGE_PLAN', lang)), back(lang)],
   );
 

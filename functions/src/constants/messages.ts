@@ -121,6 +121,17 @@ export const MESSAGES = {
     sw: '*Lipa Mos Mos* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
   },
 
+  // Shown under the status while the plan holds under KES 300: what a payout will cost, or that it is too small to send. Amounts come from PAY.
+  LMM_NOTE_FEE: {
+    en: '⚠️ *Under KES {threshold} paid.* If this is all you have by the due date, a transfer fee of {fee} is deducted: only {net} of your {credited} reaches your rent, and you still owe {fee} on your invoice. Pay KES {threshold} or more in total to avoid it.',
+    sw: '⚠️ *Chini ya KES {threshold} imelipwa.* Ikiwa hii ndiyo pekee uliyo nayo kufikia tarehe ya malipo, ada ya uhamisho ya {fee} hukatwa: ni {net} pekee kati ya {credited} yako zitafika kwenye kodi yako, na bado unadaiwa {fee} kwenye ankara. Lipa KES {threshold} au zaidi kwa jumla kuepuka ada hii.',
+  },
+
+  LMM_NOTE_TOO_SMALL: {
+    en: '⚠️ *Not enough to send yet.* The least we can send your landlord is {min}, and you have paid {credited}. It stays safely on your plan until you pay more. Pay KES {threshold} or more in total to avoid any fee.',
+    sw: '⚠️ *Bado haitoshi kutumwa.* Kiasi cha chini tunachoweza kumtumia mwenye nyumba ni {min}, na umelipa {credited}. Kinabaki salama kwenye mpango wako hadi utakapolipa zaidi. Lipa KES {threshold} au zaidi kwa jumla kuepuka ada yoyote.',
+  },
+
   LMM_ASK_AMOUNT: {
     en: 'How much would you like to pay now? Enter a whole-shilling amount (KES 10 to {max}). Suggested: {suggested}.',
     sw: 'Ungependa kulipa kiasi gani sasa? Ingiza kiasi cha shilingi kamili (KES 10 hadi {max}). Inapendekezwa: {suggested}.',

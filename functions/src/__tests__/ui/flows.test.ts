@@ -404,6 +404,25 @@ describe('Lipa Mos Mos (pay rent a little at a time)', () => {
     assert.match(r.body(), /Fee \(5%\): KES 3/); assert.match(r.body(), /You pay: KES 53/);
   });
 
+  test('the payout date is shown as a readable date, and a plan under KES 300 shows the fee warning', async () => {
+    const fee = { kind: 'fee_from_rent', creditedMinor: 4_000, feeMinor: 3_000, netMinor: 1_000, thresholdMinor: 30_000 };
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 4_000, remainingMinor: 1_546_000, pct: 0, settlesOn: '2026-11-05', dueOn: '2026-11-05', payout: fee }) } : {});
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    assert.match(r.body(), /Landlord is paid by: 5 Nov 2026/); assert.doesNotMatch(r.body(), /2026-11-05/);
+    assert.match(r.body(), /Under KES 300 paid/); assert.match(r.body(), /transfer fee of KES 30 is deducted/);
+    assert.match(r.body(), /only KES 10 of your KES 40 reaches your rent/); assert.match(r.body(), /still owe KES 30 on your invoice/);
+    assert.match(r.body(), /Pay KES 300 or more in total to avoid it/);
+    const sw = await toTenant('sw'); await sw.tap('Lipa Mos Mos'); assert.match(sw.body(), /Chini ya KES 300 imelipwa/); assert.match(sw.body(), /ada ya uhamisho ya KES 30/);
+  });
+
+  test('a plan holding less than can be sent says so; a plan at KES 300+ shows no warning', async () => {
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 3_000, payout: { kind: 'too_small', creditedMinor: 3_000, minMinor: 4_000, thresholdMinor: 30_000 } }) } : {});
+    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+    assert.match(r.body(), /Not enough to send yet/); assert.match(r.body(), /least we can send your landlord is KES 40, and you have paid KES 30/);
+    install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ payout: null }) } : {});
+    const ok = await toTenant(); await ok.tap('Lipa Mos Mos'); assert.doesNotMatch(ok.body(), /Under KES|Not enough to send/);
+  });
+
   test('an existing plan shows progress; Back steps back one screen at a time', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
     const r = await toTenant(); await r.tap('Lipa Mos Mos');
