@@ -28,6 +28,8 @@ import {
   N,
   OtpSent,
   Quota,
+  ReportKind,
+  ReportQuote,
   Snapshot,
   SnapshotResult,
   Statement,
@@ -585,6 +587,87 @@ export class MockBackend {
       });
     return { items };
   }
+
+  // ── compliance reports (same rules as the server: one free per property per month, KES 200 after, nothing before checkout) ──
+
+  private readonly reports = new Map<string, ReqRecord>();
+  private readonly reportUsed = new Map<string, number>();
+  private reportKey(ownerId: string): string { return `${ownerId}|${nairobiMonth(this.now())}`; }
+  private reportPrice(ownerId: string): number { return (this.reportUsed.get(this.reportKey(ownerId)) ?? 0) < 1 ? 0 : 200; }
+  private reportReq(actor: string, id: string): ReqRecord {
+    const r = this.reports.get(id);
+    if (!r || r.actor !== actor) this.err('LW_NOT_FOUND');
+    return r;
+  }
+
+  /** Reports carry tenant names and amounts: like the server, they need the owner's details to be unlocked. */
+  private reportAccess(actor: string, ownerId: string): MockProperty {
+    const p = this.connected(actor, ownerId);
+    if (this.unlockUntil(actor, p) === null) this.err('LW_LOCKED');
+    return p;
+  }
+
+  reportQuote(actor: string, ownerId: string): ReportQuote {
+    this.reportAccess(actor, ownerId);
+    const used = this.reportUsed.get(this.reportKey(ownerId)) ?? 0;
+    return { period: nairobiMonth(this.now()), freeIncluded: true, freeUsedThisMonth: used, priceKes: this.reportPrice(ownerId), listPriceKes: 200 };
+  }
+
+  reportOrder(actor: string, ownerId: string, month: string, kind: ReportKind): TranscriptRequest {
+    this.reportAccess(actor, ownerId);
+    if (!/^\d{4}-\d{2}$/.test(month) || !MONTH_DATA[month]) this.err('LW_BAD_MONTH');
+    if (kind !== 'mri_monthly' && kind !== 'annual_summary') this.err('LW_BAD_MONTH');
+    const requestId = `rp_${++this.seq}_${this.now().toString(36)}`;
+    const r: ReqRecord = {
+      requestId, ownerId, month, kind, title: kind === 'annual_summary' ? 'Annual rental income summary' : 'MRI working paper',
+      state: 'payment_required', priceKes: this.reportPrice(ownerId), createdAt: new Date(this.now()).toISOString(), actor, otpKey: '',
+    };
+    this.reports.set(requestId, r);
+    return this.strip(r);
+  }
+
+  reportCheckout(actor: string, requestId: string, phone?: string): TranscriptRequest {
+    const r = this.reportReq(actor, requestId);
+    if (r.state !== 'payment_required' && r.state !== 'failed') return this.strip(r);
+    const price = this.reportPrice(r.ownerId);
+    if (!phone) {
+      if (price > 0) {                                   // the free report was used meanwhile: say so, charge nothing
+        r.priceKes = price;
+        return this.strip(r);
+      }
+      const k = this.reportKey(r.ownerId);
+      this.reportUsed.set(k, (this.reportUsed.get(k) ?? 0) + 1);
+      r.priceKes = 0; r.state = 'paid'; r.generatingSince = this.now();
+      return this.strip(r);
+    }
+    if (!/^\+254[17]\d{8}$/.test(phone)) this.err('LW_PAYMENT_FAILED');
+    r.priceKes = 200; r.state = 'payment_pending'; r.payStartedAt = this.now(); r.payPhone = phone; r.error = undefined;
+    r.message = 'Check your phone for the M-Pesa prompt';
+    return this.strip(r);
+  }
+
+  reportStatus(actor: string, requestId: string): TranscriptRequest {
+    const r = this.reportReq(actor, requestId);
+    const now = this.now();
+    if (r.state === 'payment_pending' && r.payStartedAt !== undefined && now - r.payStartedAt >= this.payDelayMs) {
+      if (r.payPhone === '+254700000000') { r.state = 'failed'; r.error = { code: 'LW_PAYMENT_FAILED', message: 'Payment was cancelled' }; }
+      else { r.state = 'paid'; r.generatingSince = now; }
+    } else if (r.state === 'paid') {
+      r.state = 'generating'; r.generatingSince = r.generatingSince ?? now;
+    } else if (r.state === 'generating' && now - (r.generatingSince ?? now) >= this.generateDelayMs) {
+      r.state = 'ready'; r.url = PDF_URL; r.expiresAt = new Date(now + READY_TTL_MS).toISOString(); r.fileName = `mri-working-paper-${r.month}-${r.requestId.slice(-6)}.pdf`; r.message = undefined;
+    } else if (r.state === 'ready') {
+      if (r.expiresAt && Date.parse(r.expiresAt) <= now) { r.state = 'expired'; r.url = undefined; } else r.url = PDF_URL;
+    }
+    return this.strip(r);
+  }
+
+  reportList(actor: string, ownerId: string): { items: TranscriptRequest[] } {
+    this.reportAccess(actor, ownerId);
+    const items = [...this.reports.values()].filter((r) => r.actor === actor && r.ownerId === ownerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => { const o = this.strip(r); delete o.url; return o; });
+    return { items };
+  }
 }
 
 /** The actor-bound view of the mock backend (implements the same interface as the real client). */
@@ -608,6 +691,11 @@ export class MockLwApi implements LwApi {
   transcriptPay(requestId: string, phone: string) { return this.run(() => this.b.transcriptPay(this.actor, requestId, phone)); }
   transcriptStatus(requestId: string) { return this.run(() => this.b.transcriptStatus(this.actor, requestId)); }
   transcriptList(ownerId: string) { return this.run(() => this.b.transcriptList(this.actor, ownerId)); }
+  reportQuote(ownerId: string) { return this.run(() => this.b.reportQuote(this.actor, ownerId)); }
+  reportOrder(ownerId: string, month: string, kind: ReportKind) { return this.run(() => this.b.reportOrder(this.actor, ownerId, month, kind)); }
+  reportCheckout(requestId: string, phone?: string) { return this.run(() => this.b.reportCheckout(this.actor, requestId, phone)); }
+  reportStatus(requestId: string) { return this.run(() => this.b.reportStatus(this.actor, requestId)); }
+  reportList(ownerId: string) { return this.run(() => this.b.reportList(this.actor, ownerId)); }
 }
 
 let shared: MockBackend | null = null;

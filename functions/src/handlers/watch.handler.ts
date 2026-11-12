@@ -15,6 +15,7 @@ import {
   LwApi,
   Outbound,
   PickPurpose,
+  ReportKind,
   SendResult,
   Snapshot,
   TranscriptRequest,
@@ -269,6 +270,21 @@ export class WatchFlow {
         if (action === 'cancel' || action === 'back') return this.cancelTranscript();
         return this.checkStatusOnce();
 
+      case STATE.WATCH_RP_PHONE:
+        if (action === 'cancel' || action === 'back') return this.rpCancel();
+        if (action === 'mine') return this.rpPay(this.d.actorPhone);
+        if (action === 'other') {
+          await this.text(this.M('TR_PHONE_ASK'));
+          return;
+        }
+        if (action === 'retry') return this.rpRetry();
+        if (action) return this.rpAskPay(undefined);
+        return this.rpPhoneText(inc.text);
+
+      case STATE.WATCH_RP_PAYING:
+        if (action === 'cancel' || action === 'back') return this.rpCancel();
+        return this.rpStatusOnce();
+
       case STATE.WATCH_MENU:
       default:
         return this.onMenuAction(action);
@@ -276,6 +292,11 @@ export class WatchFlow {
   }
 
   private async onMenuAction(action: string | null): Promise<void> {
+    const kindPick = action ? /^rpk:(mri_monthly|annual_summary)$/.exec(action) : null;
+    if (kindPick) {
+      this.ctx.rpKind = kindPick[1] as ReportKind;
+      return this.showMonths('rp-month', 0);
+    }
     if (!action) {
       await this.text(this.M('REPROMPT_USE_BUTTONS'));
       return this.ctx.ownerId ? this.showMenu() : this.start();
@@ -290,7 +311,7 @@ export class WatchFlow {
     const paged = /^pg:(paid|unpaid):(\d+)$/.exec(action);
     if (paged) return this.showTenants(paged[1] as TenantListKind, parseInt(paged[2], 10));
     const pgm = /^pgm:(\d+)$/.exec(action);
-    if (pgm) return this.showMonths(this.ctx.pick === 'tr-month' ? 'tr-month' : 'view-month', parseInt(pgm[1], 10));
+    if (pgm) return this.showMonths(this.ctx.pick === 'tr-month' || this.ctx.pick === 'rp-month' ? this.ctx.pick : 'view-month', parseInt(pgm[1], 10));
     const pgp = /^pgp:(\d+)$/.exec(action);
     if (pgp) return this.showProperties(parseInt(pgp[1], 10), 'prop');
     const pgd = /^pgd:(\d+)$/.exec(action);
@@ -317,6 +338,16 @@ export class WatchFlow {
         return this.showTrend();
       case 'tr':
         return this.showMonths('tr-month', 0);
+      case 'rp':
+        return this.rpChooseKind();
+      case 'rpgo':
+        return this.rpGo();
+      case 'rpagain':
+        return this.rpSendExisting();
+      case 'rpnew':
+        return this.rpOrder();
+      case 'rpstatus':
+        return this.rpStatusOnce();
       case 'props':
         return this.showProperties(0, 'prop');
       case 'add':
@@ -365,6 +396,12 @@ export class WatchFlow {
         return;
       case STATE.WATCH_TR_PAYING:
         await this.buttons(body, [this.btn('status', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
+        return;
+      case STATE.WATCH_RP_PHONE:
+        await this.buttons(body, [this.btn('retry', 'TRY_AGAIN'), this.btn('cancel', 'CANCEL')]);
+        return;
+      case STATE.WATCH_RP_PAYING:
+        await this.buttons(body, [this.btn('rpstatus', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
         return;
       default:
         if (next === 'unlock') await this.buttons(body, [this.btn('unlock', 'UNLOCK'), ...this.navButtons()]);
@@ -485,8 +522,9 @@ export class WatchFlow {
       row('money', 'ROW_MONEY', 'DESC_MONEY'),
       row('months', 'ROW_MONTHS', 'DESC_MONTHS'),
       row('tr', 'ROW_TRANSCRIPT', 'DESC_TRANSCRIPT'),
-      row('props', 'ROW_PROPS', 'DESC_PROPS'),
     ];
+    if (cur.unlocked) rows.push(row('rp', 'ROW_REPORT', 'DESC_REPORT'));
+    rows.push(row('props', 'ROW_PROPS', 'DESC_PROPS'));
     if (!cur.unlocked) rows.push(row('unlock', 'ROW_UNLOCK', 'DESC_UNLOCK'));
     rows.push(row('settings', 'ROW_SETTINGS', 'DESC_SETTINGS'), row('main', 'ROW_MAIN', 'DESC_MAIN'));
 
@@ -599,7 +637,7 @@ export class WatchFlow {
     await this.buttons(r.text, [...nav.slice(0, 2), this.btn('menu', 'WATCH_MENU')]);
   }
 
-  private async showMonths(purpose: 'view-month' | 'tr-month', page: number): Promise<void> {
+  private async showMonths(purpose: 'view-month' | 'tr-month' | 'rp-month', page: number): Promise<void> {
     const s = await this.snap();
     if (s.months.length === 0) {
       await this.buttons(this.M('NO_MONTHS'), this.navButtons());
@@ -618,13 +656,17 @@ export class WatchFlow {
     this.go(STATE.WATCH_MENU, { screen: 'other', pick: purpose as PickPurpose, page: pg.page });
     await this.emit({
       kind: 'list',
-      body: this.M(purpose === 'view-month' ? 'PICK_MONTH' : 'PICK_MONTH_TR'),
+      body: this.M(purpose === 'view-month' ? 'PICK_MONTH' : purpose === 'rp-month' ? 'RP_MONTH' : 'PICK_MONTH_TR'),
       button: this.L('LIST_BUTTON'),
       rows,
     });
   }
 
   private async onMonthPicked(month: string): Promise<void> {
+    if (this.ctx.pick === 'rp-month') {
+      this.ctx.rpMonth = month;
+      return this.rpStart();
+    }
     if (this.ctx.pick === 'tr-month') {
       this.ctx.trMonth = month;
       return this.chooseTranscriptMonth();
@@ -959,6 +1001,250 @@ export class WatchFlow {
     this.clearRequest();
     await this.buttons(
       this.M('TR_SENT', { until: current.expiresAt ? this.M('TR_SENT_UNTIL', { when: dateTimeNairobi(current.expiresAt, this.lang) }) : '' }),
+      this.navButtons()
+    );
+  }
+
+  // ── compliance reports (MRI working paper, annual summary) ──────────────
+  // The server decides the price, the free allowance and the checkout gate; this flow only asks, shows and sends. The PDF is
+  // requested only after checkout (free: one tap; paid: M-Pesa), and its link is used once to send a WhatsApp document.
+
+  private rpTitle(kind: ReportKind | undefined): string {
+    return this.L(kind === 'annual_summary' ? 'RP_ANNUAL' : 'RP_MRI');
+  }
+
+  private clearReport(): void {
+    this.go(STATE.WATCH_MENU, { rpId: undefined, rpKind: undefined, rpMonth: undefined, screen: 'other', pick: undefined });
+  }
+
+  private async rpChooseKind(): Promise<void> {
+    this.go(STATE.WATCH_MENU, { rpId: undefined, rpKind: undefined, rpMonth: undefined, screen: 'other', pick: undefined });
+    await this.buttons(this.M('RP_KIND'), [this.btn('rpk:mri_monthly', 'RP_MRI'), this.btn('rpk:annual_summary', 'RP_ANNUAL'), this.btn('cancel', 'CANCEL')]);
+  }
+
+  private async rpCancel(): Promise<void> {
+    this.clearReport();
+    await this.text(this.M('TR_CANCELLED'));
+    return this.showMenu();
+  }
+
+  /** Month chosen: offer a report that already exists (free to send again), pick up one in flight, or order a new one. */
+  private async rpStart(): Promise<void> {
+    const ownerId = this.ctx.ownerId!, month = this.ctx.rpMonth!, kind = this.ctx.rpKind!;
+    const { items } = await this.d.api.reportList(ownerId);
+    const mine = items.filter((i) => i.month === month && i.kind === kind).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const nowMs = this.d.now();
+    const ready = mine.find((i) => i.state === 'ready' && (!i.expiresAt || Date.parse(i.expiresAt) > nowMs));
+    if (ready) {
+      this.go(STATE.WATCH_MENU, { rpId: ready.requestId, screen: 'other', pick: undefined });
+      const until = ready.expiresAt ? ` (${dateTimeNairobi(ready.expiresAt, this.lang)})` : '';
+      await this.buttons(this.M('RP_EXISTING', { title: this.rpTitle(kind), month: monthLabel(month, this.lang), until }), [
+        this.btn('rpagain', 'SEND_AGAIN'),
+        this.btn('rpnew', 'NEW_ONE'),
+        this.btn('cancel', 'CANCEL'),
+      ]);
+      return;
+    }
+    const inflight = mine.find((i) => i.state === 'payment_pending' || i.state === 'paid' || i.state === 'generating');
+    if (inflight) {
+      this.go(STATE.WATCH_RP_PAYING, { rpId: inflight.requestId, screen: 'other', pick: undefined });
+      await this.buttons(this.M('TR_NOT_YET'), [this.btn('rpstatus', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
+      return;
+    }
+    return this.rpOrder();
+  }
+
+  private async rpOrder(): Promise<void> {
+    const ownerId = this.ctx.ownerId!, month = this.ctx.rpMonth, kind = this.ctx.rpKind;
+    if (!month || !kind) return this.rpChooseKind();
+    const r = await this.d.api.reportOrder(ownerId, month, kind);
+    this.ctx.rpId = r.requestId;
+    return this.rpAfter(r);
+  }
+
+  private async rpAfter(r: TranscriptRequest): Promise<void> {
+    switch (r.state) {
+      case 'ready':
+        return this.rpDeliver(r);
+      case 'payment_required':
+        if (r.priceKes === 0) {
+          this.go(STATE.WATCH_MENU, { rpId: r.requestId, screen: 'other', pick: undefined });
+          await this.buttons(this.M('RP_FREE', { title: this.rpTitle(this.ctx.rpKind), month: monthLabel(this.ctx.rpMonth ?? r.month, this.lang) }), [
+            this.btn('rpgo', 'RP_GET_FREE'),
+            this.btn('cancel', 'CANCEL'),
+          ]);
+          return;
+        }
+        return this.rpAskPay(r.priceKes);
+      case 'expired':
+        this.clearReport();
+        await this.buttons(this.M('RP_EXPIRED'), this.navButtons());
+        return;
+      case 'failed':
+        this.clearReport();
+        await this.buttons(r.error?.code === 'CR_NO_DATA' ? lwErrorMessage('LW_REPORT_NO_DATA', this.lang) : this.M('RP_FAILED'), this.navButtons());
+        return;
+      default: // payment_pending, paid, generating: the server is working; wait for the PDF
+        this.go(STATE.WATCH_RP_PAYING, { rpId: r.requestId, screen: 'other', pick: undefined });
+        await this.save();
+        return this.rpPoll();
+    }
+  }
+
+  /** "Get free report": the zero-amount checkout. If the allowance was used meanwhile, the server says so and the price is shown. */
+  private async rpGo(): Promise<void> {
+    const id = this.ctx.rpId;
+    if (!id) return this.rpChooseKind();
+    const r = await this.d.api.reportCheckout(id);
+    if (r.state === 'payment_required' && r.priceKes > 0) {
+      await this.text(this.M('RP_PRICE_CHANGED', { price: kes(r.priceKes) }));
+      return this.rpAskPay(r.priceKes);
+    }
+    return this.rpAfter(r);
+  }
+
+  private async rpAskPay(priceKes: number | undefined): Promise<void> {
+    this.go(STATE.WATCH_RP_PHONE, { screen: 'other', pick: undefined });
+    const own = isSafaricomE164(this.d.actorPhone) ? '0' + this.d.actorPhone.slice(4) : null;
+    if (!own) {
+      await this.text(this.M('TR_PHONE_ASK'));
+      return;
+    }
+    await this.buttons(
+      this.M('RP_PAY_ASK', { title: this.rpTitle(this.ctx.rpKind), month: this.ctx.rpMonth ? monthLabel(this.ctx.rpMonth, this.lang) : '', price: priceKes === undefined ? '' : kes(priceKes), phone: own }),
+      [this.btn('mine', 'MY_NUMBER'), this.btn('other', 'OTHER_NUMBER'), this.btn('cancel', 'CANCEL')]
+    );
+  }
+
+  private async rpRetry(): Promise<void> {
+    const id = this.ctx.rpId;
+    if (!id) return this.rpChooseKind();
+    const r = await this.d.api.reportStatus(id);
+    if (r.state === 'payment_required' || r.state === 'failed') return this.rpAskPay(r.priceKes);
+    return this.rpAfter(r);
+  }
+
+  private async rpPhoneText(raw: string): Promise<void> {
+    const phone = normalizeKenyanPhone(raw);
+    if (!phone) {
+      await this.buttons(this.M('TR_PHONE_BAD'), [this.btn('mine', 'MY_NUMBER'), this.btn('cancel', 'CANCEL')]);
+      return;
+    }
+    return this.rpPay(phone);
+  }
+
+  private async rpPay(phone: string): Promise<void> {
+    const id = this.ctx.rpId;
+    if (!id) return this.rpChooseKind();
+    if (!isSafaricomE164(phone)) {
+      await this.text(this.M('TR_PHONE_BAD'));
+      return;
+    }
+    const r = await this.d.api.reportCheckout(id, phone);
+    if (r.state === 'failed') {
+      this.go(STATE.WATCH_RP_PHONE, {});
+      await this.buttons(this.M('RP_PAY_FAILED'), [this.btn('retry', 'TRY_AGAIN'), this.btn('cancel', 'CANCEL')]);
+      return;
+    }
+    if (r.state === 'payment_required') return this.rpAskPay(r.priceKes);
+    this.go(STATE.WATCH_RP_PAYING, { rpId: r.requestId, screen: 'other' });
+    await this.text(this.M('RP_PAY_SENT', { phone: '0' + phone.slice(4) }));
+    await this.save();
+    return this.rpPoll();
+  }
+
+  /** Poll every 3 s for up to 90 s; see utils/watch.poll.ts. */
+  private async rpPoll(): Promise<void> {
+    const id = this.ctx.rpId!;
+    const outcome = await pollTranscript({
+      fetch: () => this.d.api.reportStatus(id),
+      sleep: this.d.sleep,
+      now: this.d.now,
+      onSlow: async () => {
+        await this.text(this.M('TR_STILL_WAITING'));
+      },
+      shouldContinue: async () => {
+        const cur = await this.d.store.read();
+        return cur.state === STATE.WATCH_RP_PAYING && cur.ctx.rpId === id;
+      },
+    });
+    switch (outcome.kind) {
+      case 'ready':
+        return this.rpDeliver(outcome.request);
+      case 'failed':
+      case 'payment_required':
+        this.go(STATE.WATCH_RP_PHONE, {});
+        await this.buttons(this.M('RP_PAY_FAILED'), [this.btn('retry', 'TRY_AGAIN'), this.btn('cancel', 'CANCEL')]);
+        return;
+      case 'expired':
+        this.clearReport();
+        await this.buttons(this.M('RP_EXPIRED'), this.navButtons());
+        return;
+      case 'cancelled':
+        this.left = true; // another message took over; do not overwrite its state
+        return;
+      case 'timeout':
+        await this.buttons(this.M('TR_TIMEOUT'), [this.btn('rpstatus', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
+        return;
+      case 'error':
+        await this.buttons(this.M('GENERIC_ERROR'), [this.btn('rpstatus', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
+        return;
+    }
+  }
+
+  private async rpStatusOnce(): Promise<void> {
+    const id = this.ctx.rpId;
+    if (!id) return this.showMenu();
+    const r = await this.d.api.reportStatus(id);
+    if (r.state === 'ready') return this.rpDeliver(r);
+    if (r.state === 'failed' || r.state === 'payment_required') {
+      this.go(STATE.WATCH_RP_PHONE, {});
+      await this.buttons(this.M('RP_PAY_FAILED'), [this.btn('retry', 'TRY_AGAIN'), this.btn('cancel', 'CANCEL')]);
+      return;
+    }
+    if (r.state === 'expired' || r.state === 'paid' || r.state === 'generating') return this.rpAfter(r);   // paid: keep polling until the PDF is ready
+    this.go(STATE.WATCH_RP_PAYING, {});
+    await this.buttons(this.M('TR_NOT_YET'), [this.btn('rpstatus', 'CHECK_STATUS'), this.btn('cancel', 'CANCEL')]);
+  }
+
+  /** "Send again": a report that already exists is re-sent without a new charge. */
+  private async rpSendExisting(): Promise<void> {
+    const id = this.ctx.rpId;
+    if (!id) return this.rpChooseKind();
+    const r = await this.d.api.reportStatus(id);
+    if (r.state === 'ready') return this.rpDeliver(r);
+    if (r.state === 'expired') {
+      this.ctx.rpId = undefined;
+      await this.text(this.M('RP_EXPIRED'));
+      return this.rpChooseKind();
+    }
+    return this.rpAfter(r);
+  }
+
+  /** Send the PDF as a WhatsApp document. The signed URL is used once and never stored or logged. */
+  private async rpDeliver(req: TranscriptRequest): Promise<void> {
+    let current = req;
+    if (!current.url) current = await this.d.api.reportStatus(req.requestId);
+    if (current.state !== 'ready' || !current.url) {
+      this.clearReport();
+      await this.buttons(this.M('RP_FAILED'), this.navButtons());
+      return;
+    }
+    const kind = current.kind ?? this.ctx.rpKind;
+    const sent = await this.emit({
+      kind: 'document',
+      url: current.url,
+      filename: current.fileName ?? `Plot-Yangu-${kind === 'annual_summary' ? 'annual-summary' : 'MRI'}-${current.ownerId}-${current.month}.pdf`,
+      caption: this.M('RP_CAPTION', { title: this.rpTitle(kind), month: monthLabel(current.month, this.lang), ownerId: current.ownerId }),
+    });
+    if (!sent.ok) {
+      this.go(STATE.WATCH_MENU, { rpId: current.requestId, screen: 'other', pick: undefined });
+      await this.buttons(this.M('RP_DOC_FAILED'), [this.btn('rpagain', 'SEND_AGAIN'), this.btn('menu', 'WATCH_MENU')]);
+      return;
+    }
+    this.clearReport();
+    await this.buttons(
+      this.M('RP_SENT', { until: current.expiresAt ? this.M('RP_SENT_UNTIL', { when: dateTimeNairobi(current.expiresAt, this.lang) }) : '' }),
       this.navButtons()
     );
   }

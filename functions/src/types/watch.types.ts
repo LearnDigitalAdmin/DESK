@@ -139,6 +139,20 @@ export interface TranscriptRequest {
   message?: string;
   error?: { code: string; message: string };
   createdAt: string;
+  /** Compliance reports only: which report, its display name and a file name for the PDF. */
+  kind?: ReportKind;
+  title?: string;
+  fileName?: string;
+}
+
+/** Compliance reports (PAY report engine): the MRI working paper and the annual rental income summary. */
+export type ReportKind = 'mri_monthly' | 'annual_summary';
+export interface ReportQuote {
+  period: string;
+  freeIncluded: boolean;
+  freeUsedThisMonth: number;
+  priceKes: number;
+  listPriceKes: number;
 }
 
 export interface OtpSent {
@@ -173,6 +187,7 @@ export const LW_ERROR_CODES = [
   'LW_PAYMENT_FAILED',
   'LW_NOT_ALLOWED',
   'LW_UNAVAILABLE',
+  'LW_REPORT_NO_DATA',
 ] as const;
 
 export type LwErrorCode = (typeof LW_ERROR_CODES)[number];
@@ -194,6 +209,12 @@ export interface LwApi {
   transcriptPay(requestId: string, phone: string): Promise<TranscriptRequest>;
   transcriptStatus(requestId: string): Promise<TranscriptRequest>;
   transcriptList(ownerId: string): Promise<{ items: TranscriptRequest[] }>;
+  // compliance reports (server decides price, allowance and the checkout gate; the link exists only after checkout is confirmed)
+  reportQuote(ownerId: string): Promise<ReportQuote>;
+  reportOrder(ownerId: string, month: string, kind: ReportKind): Promise<TranscriptRequest>;
+  reportCheckout(requestId: string, phone?: string): Promise<TranscriptRequest>;
+  reportStatus(requestId: string): Promise<TranscriptRequest>;
+  reportList(ownerId: string): Promise<{ items: TranscriptRequest[] }>;
 }
 
 // ── Outbound WhatsApp messages (what the handler produces) ───────────────
@@ -223,7 +244,7 @@ export interface SendResult {
 
 // ── Session slice (the ONLY things the bot persists, contract section 12) ─
 
-export type PickPurpose = 'prop' | 'disc' | 'view-month' | 'tr-month';
+export type PickPurpose = 'prop' | 'disc' | 'view-month' | 'tr-month' | 'rp-month';
 
 export interface WatchCtx {
   /** Currently selected property. */
@@ -242,6 +263,10 @@ export interface WatchCtx {
   trMonth?: string;
   /** Pending transcript request id. */
   requestId?: string;
+  /** Compliance report being ordered: which one, for which month, and its order id. */
+  rpKind?: ReportKind;
+  rpMonth?: string;
+  rpId?: string;
   /** Epoch seconds before which a new code must not be requested. */
   resendAt?: number;
   /** Which screen is showing, so "back" knows whether to go to the watch menu or the main menu. */

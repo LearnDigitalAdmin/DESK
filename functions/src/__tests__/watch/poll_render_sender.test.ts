@@ -270,7 +270,7 @@ describe('bilingual strings', () => {
       assert.ok(!lwErrorMessage(code, 'en', { retryAfterSec: 90, attemptsLeft: 2 }).includes('{'), code);
       assert.ok(!lwErrorMessage(code, 'sw', { retryAfterSec: 90, attemptsLeft: 2 }).includes('{'), code);
     }
-    assert.equal(Object.keys(WATCH_ERRORS).length, 15);
+    assert.equal(Object.keys(WATCH_ERRORS).length, 16);   // 15 + LW_REPORT_NO_DATA (compliance reports)
   });
   test('rate limit and attempts are shown', () => {
     assert.match(lwErrorMessage('LW_RATE_LIMITED', 'en', { retryAfterSec: 600 }), /10 minutes/);

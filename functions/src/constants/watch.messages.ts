@@ -20,6 +20,7 @@ export const WATCH_LABELS = {
   ROW_MONEY: { en: 'Money breakdown', sw: 'Mgawanyo wa pesa' },
   ROW_MONTHS: { en: 'Other months', sw: 'Miezi mingine' },
   ROW_TRANSCRIPT: { en: 'Transcript (PDF)', sw: 'Taarifa (PDF)' },
+  ROW_REPORT: { en: 'Tax report (MRI)', sw: 'Ripoti ya kodi (MRI)' },
   ROW_PROPS: { en: 'Properties', sw: 'Mali zangu' },
   ROW_UNLOCK: { en: 'Unlock details', sw: 'Fungua maelezo' },
   ROW_SETTINGS: { en: 'Language & help', sw: 'Lugha na msaada' },
@@ -30,6 +31,7 @@ export const WATCH_LABELS = {
   DESC_MONEY: { en: 'Commission and the agent statement', sw: 'Kamisheni na taarifa ya wakala' },
   DESC_MONTHS: { en: 'Pick a month or see 6 months', sw: 'Chagua mwezi au ona miezi 6' },
   DESC_TRANSCRIPT: { en: 'Download the monthly statement', sw: 'Pakua taarifa ya mwezi' },
+  DESC_REPORT: { en: 'MRI working paper or annual summary (PDF)', sw: 'Karatasi ya MRI au muhtasari wa mwaka (PDF)' },
   DESC_PROPS: { en: 'Switch, add or disconnect', sw: 'Badilisha, ongeza au tenganisha' },
   DESC_UNLOCK: { en: 'Show tenant names and phones', sw: 'Onyesha majina na namba za wapangaji' },
   DESC_SETTINGS: { en: 'Change language, get help', sw: 'Badilisha lugha, pata msaada' },
@@ -60,6 +62,9 @@ export const WATCH_LABELS = {
   HELP: { en: 'Help', sw: 'Msaada' },
   MORE_PROPS: { en: 'More properties ›', sw: 'Mali zaidi ›' },
   MORE_MONTHS: { en: 'More months ›', sw: 'Miezi zaidi ›' },
+  RP_MRI: { en: 'MRI working paper', sw: 'Karatasi ya MRI' },
+  RP_ANNUAL: { en: 'Annual summary', sw: 'Muhtasari wa mwaka' },
+  RP_GET_FREE: { en: 'Get free report', sw: 'Pata ripoti bure' },
 } satisfies Record<string, Bi>;
 
 export type WatchLabelKey = keyof typeof WATCH_LABELS;
@@ -317,6 +322,60 @@ export const WATCH_MESSAGES = {
   },
   TR_CANCELLED: { en: 'Okay, cancelled.', sw: 'Sawa, imeghairiwa.' },
 
+  RP_KIND: {
+    en: '📊 *Tax report*\nWhich report do you need?\n\n• *MRI working paper*: one month\'s rent received, the 7.5% MRI and the KES 288,000 band test.\n• *Annual summary*: month by month for the year so far.',
+    sw: '📊 *Ripoti ya kodi*\nUnahitaji ripoti ipi?\n\n• *Karatasi ya MRI*: kodi iliyopokelewa mwezi mmoja, MRI ya 7.5% na kipimo cha KES 288,000.\n• *Muhtasari wa mwaka*: mwezi kwa mwezi kwa mwaka huu hadi sasa.',
+  },
+  RP_MONTH: {
+    en: '📅 Pick the month the rent was received.',
+    sw: '📅 Chagua mwezi ambao kodi ilipokelewa.',
+  },
+  RP_FREE: {
+    en: '📊 *{title}* · {month}\nThis one is *free*: your plan includes one report per property each month.\nThe PDF is sent only after you confirm.',
+    sw: '📊 *{title}* · {month}\nHii ni *bure*: mpango wako unajumuisha ripoti moja kwa kila mali kila mwezi.\nPDF inatumwa tu baada ya wewe kuthibitisha.',
+  },
+  RP_EXISTING: {
+    en: '📊 You already have the {title} for {month}{until}. Sending it again is free.',
+    sw: '📊 Tayari una {title} ya {month}{until}. Kuitumia tena ni bure.',
+  },
+  RP_PAY_ASK: {
+    en: '💳 *{title}* · {month}\nThis report costs *{price}*.\nPay with M-Pesa on *{phone}*, or use another number?',
+    sw: '💳 *{title}* · {month}\nRipoti hii inagharimu *{price}*.\nLipa kwa M-Pesa kupitia *{phone}*, au tumia nambari nyingine?',
+  },
+  RP_PRICE_CHANGED: {
+    en: 'This month\'s free report has been used, so this one costs *{price}*.',
+    sw: 'Ripoti ya bure ya mwezi huu imetumika, kwa hiyo hii inagharimu *{price}*.',
+  },
+  RP_PAY_SENT: {
+    en: '📲 Check your phone ({phone}) for the M-Pesa prompt and enter your PIN. I will send the PDF as soon as the payment is confirmed.',
+    sw: '📲 Angalia simu yako ({phone}) kwa ujumbe wa M-Pesa na uweke PIN yako. Nitakutumia PDF mara malipo yakithibitishwa.',
+  },
+  RP_PAY_FAILED: {
+    en: '❌ The payment did not go through. No report was issued. Would you like to try again?',
+    sw: '❌ Malipo hayakukamilika. Hakuna ripoti iliyotolewa. Ungependa kujaribu tena?',
+  },
+  RP_EXPIRED: {
+    en: 'This report order has expired. Please start a new one.',
+    sw: 'Ombi hili la ripoti limeisha muda. Tafadhali anza jipya.',
+  },
+  RP_FAILED: {
+    en: '❌ We could not prepare the report. Please try again in a moment.',
+    sw: '❌ Hatukuweza kuandaa ripoti. Tafadhali jaribu tena baada ya muda mfupi.',
+  },
+  RP_CAPTION: {
+    en: '📊 {title} · {month} · {ownerId}',
+    sw: '📊 {title} · {month} · {ownerId}',
+  },
+  RP_SENT: {
+    en: '✅ Your report is above. It is made from the records in Plot Yangu: check it against your M-Pesa and bank statements before you file on iTax. Plot Yangu does not file with KRA{until}.',
+    sw: '✅ Ripoti yako iko hapo juu. Imetengenezwa kutokana na kumbukumbu za Plot Yangu: ilinganishe na taarifa zako za M-Pesa na benki kabla ya kuwasilisha kwenye iTax. Plot Yangu haiwasilishi kwa KRA{until}.',
+  },
+  RP_SENT_UNTIL: { en: '. You can ask for it again until {when}', sw: '. Unaweza kuiomba tena hadi {when}' },
+  RP_DOC_FAILED: {
+    en: 'The file could not be sent. Tap *Send again* to get a fresh link.',
+    sw: 'Faili haikuweza kutumwa. Gusa *Tuma tena* kupata kiungo kipya.',
+  },
+
   SETTINGS: {
     en: '🌐 *Language & help*\nChoose your language:',
     sw: '🌐 *Lugha na msaada*\nChagua lugha yako:',
@@ -423,6 +482,10 @@ export const WATCH_ERRORS: Record<LwErrorCode, Bi> = {
   LW_NOT_ALLOWED: {
     en: 'Sorry, that action is not allowed. Please start again from the menu.',
     sw: 'Samahani, kitendo hicho hakiruhusiwi. Tafadhali anza tena kutoka kwenye menyu.',
+  },
+  LW_REPORT_NO_DATA: {
+    en: 'There are no synced tenant or invoice records for this property yet, so a report cannot be made. Ask the agent to turn on cloud sync.',
+    sw: 'Bado hakuna kumbukumbu za wapangaji au ankara zilizosawazishwa za mali hii, kwa hiyo ripoti haiwezi kutengenezwa. Mwombe wakala awashe usawazishaji wa wingu.',
   },
   LW_UNAVAILABLE: {
     en: 'Something went wrong on our side. Please try again in a moment.',

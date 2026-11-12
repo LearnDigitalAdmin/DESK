@@ -68,3 +68,19 @@ cd functions
 npx tsc --noEmit
 npx tsc && node --test "lib/__tests__/watch/*.test.js"
 ```
+
+## Compliance reports (Tax report, MRI)
+
+Menu row **Tax report (MRI)** (shown only when the owner's details are unlocked; the list stays within WhatsApp's 10 rows).
+Flow: choose *MRI working paper* or *Annual summary* → pick the month → the server prices it → **checkout** → PDF as a WhatsApp document.
+
+| Step | Bot call (`lwBotApi` action) | Notes |
+|---|---|---|
+| existing report for that month and kind? | `reportList {ownerId}` | ready ones can be sent again for free (7 days); never carries a link |
+| order | `reportOrder {ownerId, month, kind}` | `payment_required`, `priceKes` 0 (free allowance) or 200 |
+| free checkout | `reportCheckout {orderId}` | no phone: uses the month's free report; if it was used meanwhile the reply is `payment_required` with `priceKes: 200` and nothing is charged |
+| paid checkout | `reportCheckout {orderId, phone}` | M-Pesa STK to the chosen number (E.164) |
+| wait / deliver | `reportStatus {orderId}` | polled like transcripts; `url` exists only once `ready`; the bot sends it once as a document and never stores or logs it |
+
+The bot renders the server's numbers (price, allowance) and never decides them. Error code added: `LW_REPORT_NO_DATA` (no synced records yet).
+Tests: `src/__tests__/watch/reports.test.ts` (mock backend: `reportQuote/Order/Checkout/Status/List`, same rules as the server).

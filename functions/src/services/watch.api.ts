@@ -21,6 +21,8 @@ import {
   LwErrorCode,
   OtpSent,
   Quota,
+  ReportKind,
+  ReportQuote,
   SnapshotResult,
   TranscriptRequest,
   UnlockResult,
@@ -68,7 +70,7 @@ export const axiosPost: HttpPost = async (url, body, headers, timeoutMs) => {
   return { status: res.status, data: res.data };
 };
 
-const SLOW_ACTIONS = new Set(['transcriptVerifyOtp', 'transcriptStatus', 'transcriptPay']);
+const SLOW_ACTIONS = new Set(['transcriptVerifyOtp', 'transcriptStatus', 'transcriptPay', 'reportOrder', 'reportCheckout', 'reportStatus']);
 const DEFAULT_TIMEOUT_MS = 15_000;
 const SLOW_TIMEOUT_MS = 40_000;
 
@@ -189,6 +191,21 @@ export class HttpLwApi implements LwApi {
   }
   transcriptList(ownerId: string): Promise<{ items: TranscriptRequest[] }> {
     return this.call('transcriptList', { ownerId });
+  }
+  reportQuote(ownerId: string): Promise<ReportQuote> {
+    return this.call('reportQuote', { ownerId });
+  }
+  reportOrder(ownerId: string, month: string, kind: ReportKind): Promise<TranscriptRequest> {
+    return this.call('reportOrder', { ownerId, month, kind });
+  }
+  reportCheckout(requestId: string, phone?: string): Promise<TranscriptRequest> {
+    return this.call('reportCheckout', { orderId: requestId, ...(phone ? { phone } : {}) });
+  }
+  reportStatus(requestId: string): Promise<TranscriptRequest> {
+    return this.call('reportStatus', { orderId: requestId });
+  }
+  reportList(ownerId: string): Promise<{ items: TranscriptRequest[] }> {
+    return this.call('reportList', { ownerId });
   }
 }
 
