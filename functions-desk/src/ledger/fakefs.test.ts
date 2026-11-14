@@ -132,5 +132,5 @@ export function installFakeFirestore(fs: FakeFirestore): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const fsMod = require("firebase-admin/firestore"); const appMod = require("firebase-admin/app");
   fsMod.getFirestore = () => fs;
-  Object.defineProperty(appMod, "getApps", { configurable: true, value: () => [{}] });
+  Object.defineProperty(appMod, "getApps", { configurable: true, value: () => [{ name: "[DEFAULT]" }] });
 }

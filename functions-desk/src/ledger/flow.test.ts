@@ -462,3 +462,38 @@ test("earnings: sums by status and stream for the range, plus bonus progress; on
   await rejects(getEarnings("u1", { from: 5, to: 1 }, deps), /valid date range/);
   await rejects(getEarnings("u1", { from: 0, to: 500 * 86_400_000 }, deps), /13 months/);
 });
+
+test("compliance report: records that went stale after the quote are refused at the payment step; no M-Pesa prompt, ticket stays a draft", async () => {
+  const { p, deps } = await setup();
+  await put("desk_config/global", { delegate: { chama: "https://deskdelegate-x.a.run.app/", school: "", pms: "https://deskdelegate-pms.a.run.app/" } });
+  clearConfigCache();
+  await put("desk_sessions/s2", {
+    sessionId: "s2", agentId: "u1", entityKey: "pms:PYL-0001", scopes: ["report"], status: "active",
+    otpAttempts: 0, otpExpiresAt: Date.now() + 600_000, otpVerifiedAt: Date.now(), expiresAt: Date.now() + 3_600_000, createdAt: Date.now(),
+  });
+  let refuse = false;
+  const calls: string[] = [];
+  const delegate = {
+    getIdToken: async () => "token",
+    fetchImpl: (async (_url: string, init: { body: string }) => {
+      calls.push(JSON.parse(init.body).action);
+      return new Response(JSON.stringify(refuse
+        ? { ok: false, error: { code: "failed_precondition", message: "This landlord's records were last synced on 2026-11-05 (9 days ago), which is too old for a report. Open Plot Yangu online so it syncs, then try again." } }
+        : { ok: true, result: { ready: true, property: "Sunrise", tenants: 12 } }), { status: 200 });
+    }) as unknown as typeof fetch,
+  };
+  const cdeps: DeskDeps = { ...deps, delegate };
+
+  const q = await quoteService("u1", { sessionId: "s2", serviceType: "compliance_report", params: { reportType: "mri_monthly", propertyId: "3", month: "2026-10" } }, cdeps);
+  assert.equal(q.amountMinor, 20000);
+
+  refuse = true;                                              // the landlord's records are now over 7 days old
+  await rejects(charge(cdeps, q.ticketId), /too old for a report/);
+  assert.equal(p.charges.length, 0);                          // nobody was asked to pay
+  assert.equal((await get(`desk_tickets/${q.ticketId}`))!.status, "draft");
+
+  refuse = false;                                             // the landlord syncs; the same ticket can now be paid for
+  await charge(cdeps, q.ticketId);
+  assert.equal(p.charges.length, 1);
+  assert.ok(calls.length >= 3);                               // quote preview, refused charge, accepted charge
+});

@@ -24,6 +24,7 @@ import { planForService } from "../money.js";
 import { maskPhone, normalizeKenyaPhone } from "../paystack/phone.js";
 import { settleTicketReference } from "../ledger/settle.js";
 import { measureBulkReminder } from "../tickets/bulk.js";
+import { previewComplianceReport } from "../tickets/complianceReport.js";
 import { SERVICE_SCOPE, type DeskTicket } from "../tickets/model.js";
 import type { ActionOtpDoc } from "../types.js";
 import { buildChargeMetadata, buildCyberTransaction, CYBER_TRANSACTIONS } from "./cyberTransaction.js";
@@ -185,6 +186,15 @@ export async function chargeTicket(uid: string, data: unknown, deps: DeskDeps = 
       audience: String(t.params.audience), message: String(t.params.message), delegate: d.delegate,
     });
     bulkOtpId = await findBulkOtp(t, uid, summaryBulkSms(m.recipients), d.now());
+  }
+
+  // 3b. compliance report: the landlord's records may have gone stale (over 7 days) since the quote. The product refuses, with the reason,
+  // before anyone is asked to pay for a report that cannot be made. Runs on a re-prompt too.
+  if (t.serviceType === "compliance_report") {
+    await previewComplianceReport({
+      cfg, product: ctx.product, entityKey: ctx.entityKey, agentCode: agent.agentCode,
+      reportType: String(t.params.reportType), propertyId: String(t.params.propertyId), month: String(t.params.month), delegate: d.delegate,
+    });
   }
 
   // 4. payout subaccount (desk services always charge in the MAIN Paystack account) and the split

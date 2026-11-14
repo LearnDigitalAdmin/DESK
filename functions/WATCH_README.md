@@ -82,5 +82,5 @@ Flow: choose *MRI working paper* or *Annual summary* → pick the month → the 
 | paid checkout | `reportCheckout {orderId, phone}` | M-Pesa STK to the chosen number (E.164) |
 | wait / deliver | `reportStatus {orderId}` | polled like transcripts; `url` exists only once `ready`; the bot sends it once as a document and never stores or logs it |
 
-The bot renders the server's numbers (price, allowance) and never decides them. Error code added: `LW_REPORT_NO_DATA` (no synced records yet).
+The bot renders the server's numbers (price, allowance) and never decides them. Error codes added: `LW_REPORT_NO_DATA` (no synced records yet) and `LW_REPORT_STALE` (records not synced for over 7 days: the report cannot be ordered or paid for).
 Tests: `src/__tests__/watch/reports.test.ts` (mock backend: `reportQuote/Order/Checkout/Status/List`, same rules as the server).

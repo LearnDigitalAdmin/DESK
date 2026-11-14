@@ -487,6 +487,10 @@ export const WATCH_ERRORS: Record<LwErrorCode, Bi> = {
     en: 'There are no synced tenant or invoice records for this property yet, so a report cannot be made. Ask the agent to turn on cloud sync.',
     sw: 'Bado hakuna kumbukumbu za wapangaji au ankara zilizosawazishwa za mali hii, kwa hiyo ripoti haiwezi kutengenezwa. Mwombe wakala awashe usawazishaji wa wingu.',
   },
+  LW_REPORT_STALE: {
+    en: 'Your records have not synced to the cloud for over 7 days, so a report cannot be made or paid for yet. Open Plot Yangu online so it syncs, then try again.',
+    sw: 'Kumbukumbu zako hazijasawazishwa kwenye wingu kwa zaidi ya siku 7, kwa hiyo ripoti haiwezi kutengenezwa wala kulipiwa bado. Fungua Plot Yangu ukiwa mtandaoni ili isawazishe, kisha ujaribu tena.',
+  },
   LW_UNAVAILABLE: {
     en: 'Something went wrong on our side. Please try again in a moment.',
     sw: 'Kuna hitilafu upande wetu. Tafadhali jaribu tena baada ya muda mfupi.',

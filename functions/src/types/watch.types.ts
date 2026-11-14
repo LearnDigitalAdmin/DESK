@@ -188,6 +188,7 @@ export const LW_ERROR_CODES = [
   'LW_NOT_ALLOWED',
   'LW_UNAVAILABLE',
   'LW_REPORT_NO_DATA',
+  'LW_REPORT_STALE',
 ] as const;
 
 export type LwErrorCode = (typeof LW_ERROR_CODES)[number];
