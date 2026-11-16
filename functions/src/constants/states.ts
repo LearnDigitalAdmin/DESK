@@ -19,12 +19,22 @@ export enum STATE {
   PAY_RENT_PROCESSING = 'PAY_RENT_PROCESSING',
   PAY_RENT_CONFIRM_AMOUNT = 'PAY_RENT_CONFIRM_AMOUNT',
 
-  // Lipa Mos Mos (pay rent a little at a time)
+  // Lipa Mdogo Mdogo (pay rent a little at a time)
   LMM_MENU = 'LMM_MENU',
   LMM_FREQ = 'LMM_FREQ',
   LMM_AMOUNT = 'LMM_AMOUNT',
   LMM_PHONE = 'LMM_PHONE',
   LMM_CONFIRM = 'LMM_CONFIRM',
+
+  // Lipa Mdogo Mdogo for standalone tenants (LMMX): the bot asks PAY, signed per the LMMX contract
+  LMMX_ID = 'LMMX_ID',
+  LMMX_NOTFOUND = 'LMMX_NOTFOUND',
+  LMMX_HOME = 'LMMX_HOME',
+  LMMX_AMOUNT = 'LMMX_AMOUNT',
+  LMMX_PHONE = 'LMMX_PHONE',
+  LMMX_CONFIRM = 'LMMX_CONFIRM',
+  LMMX_DONE = 'LMMX_DONE',
+  LMMX_JOIN = 'LMMX_JOIN',
 
   // Get Invoice flow
   GET_INVOICE_WAITING_ID = 'GET_INVOICE_WAITING_ID',

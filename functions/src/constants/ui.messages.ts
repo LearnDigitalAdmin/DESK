@@ -28,7 +28,7 @@ export const UI_LABELS = {
   SEARCH_AGAIN: { en: 'Search again', sw: 'Tafuta tena' },
   CONFIRM: { en: 'Confirm', sw: 'Thibitisha' },
   PAY_NOW: { en: 'Pay now', sw: 'Lipa sasa' },
-  LMM: { en: 'Lipa Mos Mos', sw: 'Lipa Mos Mos' },
+  LMM: { en: 'Lipa Mdogo Mdogo', sw: 'Lipa Mdogo Mdogo' },
   DAILY: { en: 'Daily', sw: 'Kila siku' },
   WEEKLY: { en: 'Weekly', sw: 'Kila wiki' },
   BIWEEKLY: { en: 'Every 2 weeks', sw: 'Kila wiki 2' },
@@ -52,15 +52,25 @@ export function ulabel(key: UiLabelKey, lang: Lang, params?: Record<string, stri
 }
 
 /**
- * Main-menu rows. `value` is the option number the main-menu handler has always understood, so typing 7 still opens
+ * Main-menu rows (10 = the WhatsApp list limit, so there is no room for another). `value` is the option number the main-menu handler has always understood, so typing 7 still opens
  * Landlord Watch. The ORDER here is the display order (Exit last), not numeric.
  */
 export const MAIN_MENU_ROWS = [
-  { value: '1', title: { en: 'Pay Rent', sw: 'Lipa Kodi' }, desc: { en: 'Pay your rent with M-Pesa', sw: 'Lipa kodi yako kwa M-Pesa' } },
+  { value: '1', title: { en: 'Pay Rent', sw: 'Lipa Kodi' }, desc: { en: 'Pay your rent invoice now with M-Pesa', sw: 'Lipa ankara ya kodi sasa kwa M-Pesa' } },
   {
     value: '2',
     title: { en: 'Get Rent Invoice', sw: 'Pata Ankara ya Kodi' },
     desc: { en: 'View your invoice and its PDF link', sw: 'Ona ankara yako na kiungo cha PDF' },
+  },
+  {
+    value: '9',
+    title: { en: 'Lipa Mdogo Mdogo', sw: 'Lipa Mdogo Mdogo' },
+    desc: { en: 'Pay rent in small amounts, at your own pace', sw: 'Lipa kodi kwa awamu ndogo, kwa kasi yako' },
+  },
+  {
+    value: '10',
+    title: { en: 'Join Lipa Mdogo Mdogo', sw: 'Jiunge Lipa Mdogo Mdogo' },
+    desc: { en: 'Not signed up yet? See how to join', sw: 'Bado hujajiunga? Tazama jinsi ya kujiunga' },
   },
   {
     value: '3',

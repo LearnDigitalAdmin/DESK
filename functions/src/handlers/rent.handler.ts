@@ -16,7 +16,6 @@ import { logger } from '../utils/logger';
 import { db } from '../config/firebase.config';
 import { initiatePayment, hasPaymentInfo, getAssetContactInfo } from '../services/payment.service';
 import { btn, mainButton, mainMenuReply, Reply, row, uiButtons, uiList, uiText, welcomeReply, withNotice } from '../utils/ui';
-import { startLmm } from './lmm.handler';
 import { Outbound } from '../types/watch.types';
 
 interface TenantData {
@@ -78,7 +77,7 @@ function promptTenantId(lang: Lang): Outbound {
 }
 
 function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outbound {
-  // A list, not buttons: WhatsApp shows at most 3 buttons, and there are now 4 choices (the row ids are the same values as before).
+  // A list so the choices read clearly (Lipa Mdogo Mdogo now has its own main-menu entry, so it is no longer offered here).
   return uiList(
     getMessage('TENANT_FOUND', lang, {
       name: tenant.name,
@@ -88,14 +87,13 @@ function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outb
     ulabel('LIST_BUTTON', lang),
     [
       row('CONTINUE', ulabel('PAY_ALL_AT_ONCE', lang)),
-      row('LMM', ulabel('LMM', lang)),
       row('EDIT', ulabel('SEARCH_AGAIN', lang)),
       row('#', ulabel('MAIN', lang)),
     ]
   );
 }
 
-/** The tenant-found screen rebuilt from the saved session (used by Lipa Mos Mos to go back). */
+/** The tenant-found screen rebuilt from the saved session (used by Lipa Mdogo Mdogo to go back). */
 export function tenantFoundScreen(session: Session): Outbound | null {
   const { tenant, invoice } = readSaved(session);
   return tenant && invoice ? tenantFound(session.language, tenant, invoice) : null;
@@ -226,6 +224,68 @@ async function handleNavigation(phone: string, input: string, session: Session):
  * ================================================================== */
 
 /**
+ * Look a tenant up by ID across the landlords' PMS data and find their unpaid invoice. Shared by Pay Rent and by the
+ * Lipa Mdogo Mdogo entry (for a tenant whose landlord uses Plot Yangu), so both see exactly the same tenant.
+ */
+export async function findTenantAndInvoice(tenantId: string): Promise<{ tenant: TenantData | null; invoice: InvoiceData | null; assetId: string | null }> {
+  // Search for tenant and invoice in Firestore
+  const usersRef = db.collection('users');
+  const allUsers = await usersRef.get();
+
+  let foundTenant: TenantData | null = null;
+  let foundInvoice: InvoiceData | null = null;
+  let assetId: string | null = null;
+
+  // Search through all users for the tenant
+  for (const userDoc of allUsers.docs) {
+    const tenantIdNum = parseInt(tenantId);
+    const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
+
+    try {
+      const tenantsRef = userDoc.ref.collection('tenants');
+      const tenantSnapshot = await tenantsRef.where('localId', 'in', searchIds).get();
+
+      if (!tenantSnapshot.empty) {
+        const tenantDoc = tenantSnapshot.docs[0];
+        foundTenant = {
+          id: tenantDoc.id,
+          ...(tenantDoc.data() as any),
+        };
+        assetId = userDoc.id;
+
+        logger.info('Tenant found', { tenantId, assetId });
+        break;
+      }
+    } catch (err) {
+      // Continue searching other users
+      continue;
+    }
+  }
+
+  if (!foundTenant) return { tenant: null, invoice: null, assetId: null };
+
+  // Find unpaid invoice or last paid invoice
+  if (assetId) {
+    const invoicesRef = db.collection('users').doc(assetId).collection('invoices');
+    const tenantIdNum = parseInt(tenantId);
+    const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
+
+    // Search for unpaid invoices first
+    const unpaidSnapshot = await invoicesRef.where('tenantId', 'in', searchIds).where('isPaid', '==', false).get();
+
+    if (!unpaidSnapshot.empty) {
+      const invoiceDoc = unpaidSnapshot.docs[0];
+      foundInvoice = {
+        id: invoiceDoc.id,
+        ...(invoiceDoc.data() as any),
+      };
+    }
+  }
+
+  return { tenant: foundTenant, invoice: foundInvoice, assetId };
+}
+
+/**
  * Handle tenant ID for pay rent
  */
 export async function handlePayRentId(phone: string, input: string, session: Session): Promise<Reply> {
@@ -246,64 +306,11 @@ export async function handlePayRentId(phone: string, input: string, session: Ses
     // Perform the search immediately (don't wait for next message)
     logger.info('Tenant ID collected, searching for tenant and invoice', { tenantId });
 
-    // Search for tenant and invoice in Firestore
-    const usersRef = db.collection('users');
-    const allUsers = await usersRef.get();
-
-    let foundTenant: TenantData | null = null;
-    let foundInvoice: InvoiceData | null = null;
-    let assetId: string | null = null;
-
-    // Search through all users for the tenant
-    for (const userDoc of allUsers.docs) {
-      const tenantIdNum = parseInt(tenantId);
-      const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
-
-      try {
-        const tenantsRef = userDoc.ref.collection('tenants');
-        const tenantSnapshot = await tenantsRef.where('localId', 'in', searchIds).get();
-
-        if (!tenantSnapshot.empty) {
-          const tenantDoc = tenantSnapshot.docs[0];
-          foundTenant = {
-            id: tenantDoc.id,
-            ...(tenantDoc.data() as any),
-          };
-          assetId = userDoc.id;
-
-          logger.info('Tenant found', { tenantId, assetId });
-          break;
-        }
-      } catch (err) {
-        // Continue searching other users
-        continue;
-      }
-    }
+    const { tenant: foundTenant, invoice: foundInvoice, assetId } = await findTenantAndInvoice(tenantId);
 
     if (!foundTenant) {
       logger.warn('Tenant not found', { tenantId });
       return withNotice(promptTenantId(lang), getMessage('TENANT_NOT_FOUND', lang));
-    }
-
-    // Find unpaid invoice or last paid invoice
-    if (assetId) {
-      const invoicesRef = db.collection('users').doc(assetId).collection('invoices');
-      const tenantIdNum = parseInt(tenantId);
-      const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
-
-      // Search for unpaid invoices first
-      const unpaidSnapshot = await invoicesRef
-        .where('tenantId', 'in', searchIds)
-        .where('isPaid', '==', false)
-        .get();
-
-      if (!unpaidSnapshot.empty) {
-        const invoiceDoc = unpaidSnapshot.docs[0];
-        foundInvoice = {
-          id: invoiceDoc.id,
-          ...(invoiceDoc.data() as any),
-        };
-      }
     }
 
     if (!foundInvoice) {
@@ -358,9 +365,6 @@ export async function handlePayRentMpesa(phone: string, input: string, session: 
       await updateSessionState(phone, STATE.PAY_RENT_WAITING_ID, {});
       return promptTenantId(lang);
     }
-
-    // Lipa Mos Mos: pay a little at a time
-    if (response === 'LMM') return startLmm(phone, session);
 
     // Handle CONTINUE
     if (['CONTINUE', 'ENDELEA', 'YES', 'NDIO'].includes(response)) {

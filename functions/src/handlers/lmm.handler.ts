@@ -1,5 +1,5 @@
 /**
- * Lipa Mos Mos on WhatsApp: pay rent a little at a time. Reached from the tenant-found screen of Pay Rent.
+ * Lipa Mdogo Mdogo on WhatsApp: pay rent a little at a time. Reached from the tenant-found screen of Pay Rent.
  * All money logic (the 2.5% / 5% fee, the plan, settling the landlord) lives in PAY; this file only asks PAY and shows the answers.
  * The bot never sends a destination or a credited amount it decided itself: PAY recomputes and verifies everything.
  */
@@ -94,7 +94,7 @@ const summary = (lang: Lang, credit: number, phone: string): Outbound => {
   return uiButtons(getMessage('LMM_SUMMARY', lang, { credit: kesWhole(credit), pct: c.pct, fee: kesWhole(c.fee), total: kesWhole(c.total), phone }), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
 };
 
-/** Typed navigation inside Lipa Mos Mos: 0 goes back one step, 00 restarts Pay Rent, 000 leaves, # is the main menu (a button). */
+/** Typed navigation inside Lipa Mdogo Mdogo: 0 goes back one step, 00 restarts Pay Rent, 000 leaves, # is the main menu (a button). */
 async function navigate(phone: string, input: string, session: Session): Promise<Reply | null> {
   const lang = session.language;
   const nav = checkNavigationCommand(input);
@@ -114,7 +114,7 @@ async function navigate(phone: string, input: string, session: Session): Promise
 }
 
 const fail = async (phone: string, session: Session, err: unknown): Promise<Reply> => {
-  logger.error('Lipa Mos Mos error', err);
+  logger.error('Lipa Mdogo Mdogo error', err);
   const reason = err instanceof Error ? err.message : 'please try again';
   await updateSessionState(phone, STATE.LMM_MENU, {});
   return withNotice(uiButtons(getMessage('LMM_ERROR', session.language, { reason }), [btn('RETRY', ulabel('LMM', session.language)), mainButton(session.language)]), '');

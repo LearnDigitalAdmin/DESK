@@ -19,7 +19,7 @@ describe('language and main menu', () => {
     assert.equal(r.state, STATE.MAIN_MENU);
     assert.equal(r.lastInteractive().kind, 'list');
     assert.ok(r.titles().includes('Lipa Kodi'));
-    assert.equal(r.titles().length, 8);
+    assert.equal(r.titles().length, 10);
   });
 
   test('typed numbers still work: 6 opens Help, then Main menu returns', async () => {
@@ -30,7 +30,7 @@ describe('language and main menu', () => {
     assert.deepEqual(r.titles(), ['Main menu']);
     await r.tap('Main menu');
     assert.equal(r.state, STATE.MAIN_MENU);
-    assert.equal(r.titles().length, 8);
+    assert.equal(r.titles().length, 10);
   });
 
   test('Help: any message returns to the main menu (it used to fall into "Unknown state")', async () => {
@@ -110,7 +110,7 @@ describe('Pay Rent', () => {
     assert.equal(r.state, STATE.PAY_RENT_MPESA);
     assert.match(r.body(), /Jane Wanjiru/);
     assert.match(r.body(), /15,500/);
-    assert.deepEqual(r.titles(), ['Pay in full', 'Lipa Mos Mos', 'Search again', 'Main menu']);
+    assert.deepEqual(r.titles(), ['Pay in full', 'Search again', 'Main menu']);
 
     await r.tap('Pay in full');
     assert.equal(r.state, STATE.PAY_RENT_AMOUNT);
@@ -175,7 +175,7 @@ describe('Pay Rent', () => {
     await r.say(TENANT_ID);
     assert.match(r.body(), /Mpangaji amepatikana/);
     assert.doesNotMatch(r.body(), /[Mm]kokoteni/);
-    assert.deepEqual(r.titles(), ['Lipa kikamilifu', 'Lipa Mos Mos', 'Tafuta tena', 'Menyu kuu']);
+    assert.deepEqual(r.titles(), ['Lipa kikamilifu', 'Tafuta tena', 'Menyu kuu']);
   });
 });
 
@@ -227,7 +227,7 @@ describe('My Chama', () => {
     await r.say('3');
     await r.tap('Cancel');
     assert.equal(r.state, STATE.MAIN_MENU);
-    assert.equal(r.titles().length, 8);
+    assert.equal(r.titles().length, 10);
   });
 
   test('contribution: paged picker (12 periods), pick the 9th on page 2, pay in full through phone, network and confirm', async () => {
@@ -346,7 +346,7 @@ describe('Landlord Watch hand-off', () => {
     assert.equal(r.state, STATE.MAIN_MENU);
     const last = r.sent[r.sent.length - 1];
     assert.equal(last.kind, 'list');
-    assert.equal(last.kind === 'list' && last.rows.length, 8);
+    assert.equal(last.kind === 'list' && last.rows.length, 10);
   });
 
   test('a stale main-menu tap while inside Landlord Watch is answered with the notice', async () => {
@@ -360,29 +360,38 @@ describe('Landlord Watch hand-off', () => {
 });
 
 
-describe('Lipa Mos Mos (pay rent a little at a time)', () => {
+describe('Lipa Mdogo Mdogo (pay rent a little at a time)', () => {
   const rentPay = require('../../services/payment.service');
   const calls: { name: string; data: any }[] = [];
   const install = (impl: (name: string, data: any) => any) => {
     rentPay.callCloudFunction = async (url: string, data: any) => { const name = url.split('/').pop() as string; calls.push({ name, data }); return impl(name, data); };
   };
   const planView = (over: any = {}) => ({ frequency: 'weekly', status: 'active', targetMinor: 1_550_000, creditedMinor: 300_000, remainingMinor: 1_250_000, pct: 19, settlesOn: '2026-11-05', suggestedMinor: 300_000, ...over });
+  // The legacy plan flow is now reached from the main menu (Lipa Mdogo Mdogo, option 9): the ID is looked up with PAY, and an
+  // answer of `legacy` (landlord on Plot Yangu) starts the EXISTING flow, unchanged. The lookup answer is stubbed here.
+  const lmmxClient = require('../../services/lmmx.client');
   const toTenant = async (lang: 'en' | 'sw' = 'en') => {
-    const r = fresh(lang); await r.say('1'); await r.say(TENANT_ID); return r;
+    lmmxClient.lookup = async () => ({ kind: 'legacy' });
+    const r = fresh(lang); await r.say('9'); await r.say(TENANT_ID); return r;
   };
 
-  test('the tenant-found screen offers Lipa Mos Mos in English and Swahili', async () => {
+  test('Pay Rent no longer offers Lipa Mdogo Mdogo; the main menu does, in English and Swahili', async () => {
     calls.length = 0;
-    assert.ok((await toTenant('en')).titles().includes('Lipa Mos Mos'));
-    assert.ok((await toTenant('sw')).titles().includes('Lipa Mos Mos'));
+    for (const lang of ['en', 'sw'] as const) {
+      const r = fresh(lang); await r.say('1'); await r.say(TENANT_ID);
+      assert.ok(!r.titles().includes('Lipa Mdogo Mdogo'));
+      assert.equal(r.titles().length, 3);
+      const m = fresh(lang); await m.say('#');
+      assert.ok(m.titles().includes('Lipa Mdogo Mdogo'));
+      assert.ok(m.titles().includes(lang === 'en' ? 'Join Lipa Mdogo Mdogo' : 'Jiunge Lipa Mdogo Mdogo'));
+    }
   });
 
   test('no plan yet: asks how often, starts the plan, then asks how much, previews the fee, and pays through PAY', async () => {
     calls.length = 0;
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: null, targetMinor: 1_550_000, settlesOn: '2026-11-05', suggestedMinor: 300_000 }
       : name === 'lmm_start' ? { available: true, plan: planView({ creditedMinor: 0 }) } : { reference: 'LMM_x', displayText: 'Enter PIN' });
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Pay your rent a little at a time/); assert.match(r.body(), /KES 15,500/);
+    const r = await toTenant(); assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Pay your rent a little at a time/); assert.match(r.body(), /KES 15,500/);
     assert.deepEqual(r.titles(), ['Daily', 'Weekly', 'Every 2 weeks', 'Back', 'Main menu']);
     await r.tap('Weekly'); assert.equal(r.state, STATE.LMM_AMOUNT); assert.match(r.body(), /whole-shilling/);
     await r.say('12.5'); assert.match(r.body(), /whole-shilling amount between KES 10/);
@@ -398,8 +407,7 @@ describe('Lipa Mos Mos (pay rent a little at a time)', () => {
 
   test('under KES 100 the preview shows the 5% fee', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { reference: 'LMM_x', displayText: 'ok' });
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    assert.match(r.body(), /Progress: 19%/); assert.match(r.body(), /Balance: KES 12,500/);
+    const r = await toTenant(); assert.match(r.body(), /Progress: 19%/); assert.match(r.body(), /Balance: KES 12,500/);
     await r.tap('Pay now'); await r.say('50'); await r.say('0712345678');
     assert.match(r.body(), /Fee \(5%\): KES 3/); assert.match(r.body(), /You pay: KES 53/);
   });
@@ -407,48 +415,43 @@ describe('Lipa Mos Mos (pay rent a little at a time)', () => {
   test('the payout date is shown as a readable date, and a plan under KES 300 shows the fee warning', async () => {
     const fee = { kind: 'fee_from_rent', creditedMinor: 4_000, feeMinor: 3_000, netMinor: 1_000, thresholdMinor: 30_000 };
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 4_000, remainingMinor: 1_546_000, pct: 0, settlesOn: '2026-11-05', dueOn: '2026-11-05', payout: fee }) } : {});
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    assert.match(r.body(), /Landlord is paid by: 5 Nov 2026/); assert.doesNotMatch(r.body(), /2026-11-05/);
+    const r = await toTenant(); assert.match(r.body(), /Landlord is paid by: 5 Nov 2026/); assert.doesNotMatch(r.body(), /2026-11-05/);
     assert.match(r.body(), /Under KES 300 paid/); assert.match(r.body(), /transfer fee of KES 30 is deducted/);
     assert.match(r.body(), /only KES 10 of your KES 40 reaches your rent/); assert.match(r.body(), /still owe KES 30 on your invoice/);
     assert.match(r.body(), /Pay KES 300 or more in total to avoid it/);
-    const sw = await toTenant('sw'); await sw.tap('Lipa Mos Mos'); assert.match(sw.body(), /Chini ya KES 300 imelipwa/); assert.match(sw.body(), /ada ya uhamisho ya KES 30/);
+    const sw = await toTenant('sw'); assert.match(sw.body(), /Chini ya KES 300 imelipwa/); assert.match(sw.body(), /ada ya uhamisho ya KES 30/);
   });
 
   test('a plan holding less than can be sent says so; a plan at KES 300+ shows no warning', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 3_000, payout: { kind: 'too_small', creditedMinor: 3_000, minMinor: 4_000, thresholdMinor: 30_000 } }) } : {});
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    assert.match(r.body(), /Not enough to send yet/); assert.match(r.body(), /least we can send your landlord is KES 40, and you have paid KES 30/);
+    const r = await toTenant(); assert.match(r.body(), /Not enough to send yet/); assert.match(r.body(), /least we can send your landlord is KES 40, and you have paid KES 30/);
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ payout: null }) } : {});
-    const ok = await toTenant(); await ok.tap('Lipa Mos Mos'); assert.doesNotMatch(ok.body(), /Under KES|Not enough to send/);
+    const ok = await toTenant(); assert.doesNotMatch(ok.body(), /Under KES|Not enough to send/);
   });
 
   test('an existing plan shows progress; Back steps back one screen at a time', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    await r.tap('Pay now'); assert.equal(r.state, STATE.LMM_AMOUNT);
+    const r = await toTenant(); await r.tap('Pay now'); assert.equal(r.state, STATE.LMM_AMOUNT);
     await r.say('3000'); assert.equal(r.state, STATE.LMM_PHONE);
     await r.tap('Back'); assert.equal(r.state, STATE.LMM_AMOUNT);
     await r.tap('Back'); assert.equal(r.state, STATE.LMM_MENU);
-    await r.tap('Back'); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.ok(r.titles().includes('Lipa Mos Mos'));
+    await r.tap('Back'); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.ok(!r.titles().includes('Lipa Mdogo Mdogo'));
   });
 
   test('not available for this landlord: says so and returns to the tenant screen', async () => {
-    install(() => ({ available: false, reason: 'This landlord has not enabled Lipa Mos Mos yet.' }));
-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
-    assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.match(r.body(), /not available right now/); assert.match(r.body(), /has not enabled/);
+    install(() => ({ available: false, reason: 'This landlord has not enabled Lipa Mdogo Mdogo yet.' }));
+    const r = await toTenant(); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.match(r.body(), /not available right now/); assert.match(r.body(), /has not enabled/);
   });
 
   test('a PAY error is shown to the tenant and nothing is paid', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { error: { message: 'That is more than you owe. The balance is KES 12,500.' } });
-    const r = await toTenant(); await r.tap('Lipa Mos Mos'); await r.tap('Pay now'); await r.say('3000'); await r.say('0712345678'); await r.tap('Confirm');
+    const r = await toTenant(); await r.tap('Pay now'); await r.say('3000'); await r.say('0712345678'); await r.tap('Confirm');
     assert.match(r.allText(), /We could not complete that: That is more than you owe/);
   });
 
   test('Swahili screens', async () => {
     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
-    const r = await toTenant('sw'); await r.tap('Lipa Mos Mos');
-    assert.match(r.body(), /Umelipa: KES 3,000 kati ya KES 15,500/); assert.deepEqual(r.titles(), ['Lipa sasa', 'Badilisha mara', 'Nyuma']);
+    const r = await toTenant('sw'); assert.match(r.body(), /Umelipa: KES 3,000 kati ya KES 15,500/); assert.deepEqual(r.titles(), ['Lipa sasa', 'Badilisha mara', 'Nyuma']);
     await r.tap('Lipa sasa'); assert.match(r.body(), /shilingi kamili/);
   });
 });

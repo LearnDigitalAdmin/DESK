@@ -94,12 +94,12 @@ describe('pickers', () => {
 });
 
 describe('main menu and welcome', () => {
-  test('main menu: all 8 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
+  test('main menu: all 10 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
     for (const lang of LANGS) {
       const menu = mainMenuReply(lang);
       const rows = rowsOf(menu);
-      assert.equal(rows.length, 8);
-      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '2', '3', '4', '5', '6', '7', '8']);
+      assert.equal(rows.length, 10);
+      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '10', '2', '3', '4', '5', '6', '7', '8', '9']);
       assert.equal(rows[rows.length - 1].id, 'ui:MAIN_MENU:5');
       assert.ok(rows.every((r) => !!r.description));
       assert.ok(!needsState(menu));
@@ -117,7 +117,7 @@ describe('sender integration', () => {
     const [m] = expandOutbound(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);
     const payload = buildCloudPayload('254712345678', m) as { interactive: { type: string; action: { sections: Array<{ rows: unknown[] }> } } };
     assert.equal(payload.interactive.type, 'list');
-    assert.equal(payload.interactive.action.sections[0].rows.length, 8);
+    assert.equal(payload.interactive.action.sections[0].rows.length, 10);
   });
   test('typed fallback leads each line with what the user would type', () => {
     const text = toNumberedText(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);

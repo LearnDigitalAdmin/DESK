@@ -48,6 +48,18 @@ import {
 } from '../handlers/rent.handler';
 import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../handlers/watch.entry';
 import { handleHouseToRent } from '../handlers/house.handler';
+import {
+  handleLmmxAmount,
+  handleLmmxConfirm,
+  handleLmmxDone,
+  handleLmmxHome,
+  handleLmmxId,
+  handleLmmxJoin,
+  handleLmmxNotFound,
+  handleLmmxPhone,
+  lmmxCodeReply,
+} from '../handlers/lmmx.handler';
+import { parseLmmxCode } from '../types/lmmx.contract';
 import { isWatchState } from '../handlers/watch.handler';
 import { claimMessage } from '../services/message-dedup.service';
 import { logger } from '../utils/logger';
@@ -142,6 +154,14 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
     });
     logger.setContext({ phone, state: session.currentState });
 
+    // Lipa Mdogo Mdogo codes (LMM#### to confirm a sign-up or change, LMC#### to cancel a change) are understood from
+    // EVERY state, the language screen and idle included, and never move the user: the reply is sent and the session
+    // is left exactly as it was. Only the typed text can be a code (a button or row id never parses as one).
+    if (parseLmmxCode(message.text?.body)) {
+      await sendReply(phone, await lmmxCodeReply(phone, message.text?.body ?? '', session.language), session.currentState);
+      return;
+    }
+
     // A tap on a button or list row of the shared UI is the same as typing its value (see utils/ui.ts). A tap on a
     // screen the user has already left is answered with a notice and never acted on.
     const tap = resolveTap(interactiveId, session.currentState);
@@ -235,6 +255,31 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
         break;
       case STATE.LMM_CONFIRM:
         response = await handleLmmConfirm(phone, input, session);
+        break;
+
+      case STATE.LMMX_ID:
+        response = await handleLmmxId(phone, input, session);
+        break;
+      case STATE.LMMX_NOTFOUND:
+        response = await handleLmmxNotFound(phone, input, session);
+        break;
+      case STATE.LMMX_HOME:
+        response = await handleLmmxHome(phone, input, session);
+        break;
+      case STATE.LMMX_AMOUNT:
+        response = await handleLmmxAmount(phone, input, session);
+        break;
+      case STATE.LMMX_PHONE:
+        response = await handleLmmxPhone(phone, input, session);
+        break;
+      case STATE.LMMX_CONFIRM:
+        response = await handleLmmxConfirm(phone, input, session);
+        break;
+      case STATE.LMMX_DONE:
+        response = await handleLmmxDone(phone, input, session);
+        break;
+      case STATE.LMMX_JOIN:
+        response = await handleLmmxJoin(phone, input, session);
         break;
 
       case STATE.GET_INVOICE_WAITING_ID:

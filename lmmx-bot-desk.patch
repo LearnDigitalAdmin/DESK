@@ -1,0 +1,2326 @@
+diff --git a/DEPLOY_TENANT_BOT.md b/DEPLOY_TENANT_BOT.md
+new file mode 100644
+index 0000000..9844cef
+--- /dev/null
++++ b/DEPLOY_TENANT_BOT.md
+@@ -0,0 +1,80 @@
++# Lipa Mdogo Mdogo: tenant web app (PAY) and WhatsApp bot (DESK)
++
++Two patches, deployed separately. Neither needs PMS. Both follow `LMM_CONTRACT.md` (contract version 1).
++
++| Patch | Repo | Base | Deploy |
++|---|---|---|---|
++| `lmmx-tenant-pay.patch` | PAY | `400c8744cdc471b56232cd82a1f56318185ebd49` | hosting only (`src/**`) |
++| `lmmx-bot-desk.patch` | DESK | `42e28baa7cbfc0ad3597150501e3c29935f74659` | one function: `whatsappWebhook` |
++
++The money, identity and fee logic is CORE's (PAY `functions/`). Until CORE's `lmmx_tenant_*` and `lmmx_bot_*` callables are deployed, the real screens cannot work; use mock mode (below) to try everything.
++
++## 1. PAY tenant web app
++
++```bash
++git apply --check lmmx-tenant-pay.patch && git apply lmmx-tenant-pay.patch
++npm ci && npm run build && firebase deploy --only hosting --project plot-9fd6e   # site: payments-1x
++```
++
++* `npm run build` must be run WITHOUT `VITE_LMMX_MOCK` for production. With `VITE_LMMX_MOCK=true` the `/lmmx/demo` page and fake data are included: never deploy that build.
++* Contract drift check (after CORE's patch is applied): `npm run check:lmmx-contract`. Before CORE's copy exists it says so and exits 1.
++* What changed for existing users: after a tenant signs in with the phone code they now pass through `/lmmx` first. A tenant who already has a rent-invoice profile is checked quietly and, unless they also have a Lipa Mdogo Mdogo account, lands on `/tenant` exactly as before. If that check fails for any reason they also land on `/tenant`. Landlord (agent) sign-in is untouched.
++* The legacy plan screens only had their name changed to "Lipa Mdogo Mdogo" (`LipaMosMos.tsx`, `TenantView.tsx`, `AgentView.tsx`); code names are unchanged.
++
++### Mock mode (web)
++
++```bash
++VITE_LMMX_MOCK=true npm run dev
++# open http://localhost:5173/lmmx/demo
++```
++
++"Demo tools" on that page switch scenario (active, awaiting setup, frozen, cooling-off, deferred, waiting for a code, paid up) and can make the next call fail with any error code. Fake IDs on the link screen (needs a sign-in, so this is for `/lmmx`): `11111111` Lipa Mdogo Mdogo only, `22222222` invoice only, `33333333` both, `99999999` rate-limited, anything else "not found". Codes: `LMM4683` / `LMC7391` right, `LMM0000` expired, `LMM9999` locked, any other wrong (counts tries). Paying from `0700000000` ends as declined; any other number succeeds after about 6 seconds.
++
++## 2. WhatsApp bot (DESK `functions/src`, codebase `default`)
++
++```bash
++git apply --check lmmx-bot-desk.patch && git apply lmmx-bot-desk.patch
++cd functions && npm ci && npx tsc && node --test "lib/__tests__/**/*.test.js" && cd ..
++bash deploy-lmmx.sh          # deploys functions:default:whatsappWebhook (the only function changed)
++```
++
++* `bash deploy-lmmx.sh <names...>` deploys other `default` functions the same careful way (3 per batch, retries, pauses). `DRY_RUN=1` prints the plan, `PROJECT=plot-9fd6e` picks the project.
++* Only `whatsappWebhook` changed. `functions-desk/` (codebase `desk`) and `src/desk/**` are not touched.
++* Baseline note: 2 House to Rent tests (`sendInquiry`, the inquire-once-per-day rule) already fail on the untouched base commit. They are unrelated and unchanged; everything else passes.
++
++### The secret
++
++The bot signs every call to PAY with `LMMX_BOT_KEY`, read from the shared secret bundle (`app-secrets-bundle`), exactly like the other bot secrets. CORE's instructions say how to create it; the same value must be in PAY's bundle so PAY can check the signature. Nothing new is bound to the function: `whatsappWebhook` already has the bundle.
++
++Without it: no call to PAY is ever sent (the bot fails closed). Menu options 9 and 10 still open; Lipa Mdogo Mdogo says "Something went wrong on our side, please try again in a few minutes", Join shows the built-in text with the support number, and a `LMM1234` message gets "We could not check that code right now". Pay Rent, Invoice, My Chama, Landlord Watch, House to Rent and the legacy plan flow are unaffected.
++
++### Mock mode (bot)
++
++`LMMX_MOCK=1` answers every PAY call from fixtures (no network, no secret). The tests set it themselves. To try it in a real chat, put `LMMX_MOCK=1` in `functions/.env`, deploy, and REMOVE IT AGAIN afterwards: in mock mode nothing real is charged, but replies are fake.
++Fake IDs: `11111111` active, `22222222` legacy, `33333333` frozen, `44444444` awaiting setup, anything else not found. Codes: `LMM4683` setup confirmed, `LMM5555` change confirmed, `LMC4683` change cancelled, `LMM0000` expired, `LMM9999` locked, `LMM2222` not found, other codes invalid. Paying from `0700000000` is refused; from `0711111111` it times out.
++
++## 3. Manual test script (owner)
++
++Use a real tenant set up by a desk (with the SMS code not yet used) and a second phone with no account.
++
++**Web: sign in and link**
++1. Open the PAY site, choose Tenant, sign in with the tenant's phone code. You should land on a "Find your Lipa Mdogo Mdogo account" screen.
++2. Enter a wrong ID: one generic failure message (it must not say whether the phone or the ID was wrong). Enter the right ID: you reach the dashboard. If the same person is also a Plot Yangu tenant, a two-card chooser appears first.
++3. Awaiting setup: the dashboard shows "One last step". Type `LMM####` from the SMS (or just the 4 digits): it turns active. A wrong code shows tries left; five wrong ones lock it.
++
++**Web: pay, history, settings**
++4. Pay tab: type an amount (try 5 = refused, 10 = accepted, a quick button). The three lines "Goes to your rent / Fees / You pay" appear (first as an estimate, then the exact price). Approve the M-PESA prompt: the screen says "Check your phone", then "Payment received" only after the balance on Home has gone down. Cancel the prompt on the phone: it should end as "did not go through" or, after two minutes, "We have not seen the payment yet" (do not claim success).
++5. History lists it. Settings: change the due day once (works, says it starts next cycle), try again at once (refused with the lock rule explained). Change frequency and suggested amount.
++6. If a desk has requested a change: it shows under "A change is waiting"; confirm it with `LMM####`, or cancel it with `LMC####` in "Cancel this change".
++
++**Bot**
++7. From a fresh chat, send `hi`, pick a language, open the main menu: you should see "Lipa Mdogo Mdogo" and "Join Lipa Mdogo Mdogo" (10 rows, Exit last). "Pay Rent" now says "Pay your rent invoice now with M-Pesa".
++8. Lipa Mdogo Mdogo, tenant ID: status shows rent, still to pay, due date and pay-by date. Pay now: suggested amount button, then the quote (rent / fees / you pay), M-Pesa number (button for your own number), Confirm. You get "M-Pesa prompt sent" and, after PIN, your SMS. Check balance shows the new balance. `0` goes back, `#` main menu, `00` and `000` as in the other flows.
++9. From the second phone (or a wrong ID): "We could not find an account", with Try again, Join Lipa Mdogo and Main menu. Join shows the support numbers.
++10. Awaiting-setup tenant: the bot says to send the SMS code. Frozen tenant: "on hold, contact support".
++11. **Code from a fresh chat**: with a brand-new chat (or mid-way through any other flow), send `LMM####` from the tenant's own phone. The reply confirms the setup or change; the chat stays where it was. Repeat with `LMC####` for a change you want to cancel, a wrong code, and the same code twice (expired or invalid).
++
++**Legacy paths still working**
++12. Pay Rent (menu 1): ID, tenant-found screen now lists Pay in full, Search again, Main menu (no Lipa Mdogo Mdogo button). Pay a small amount to confirm the STK still arrives.
++13. Legacy plan: Lipa Mdogo Mdogo (menu 9) with the ID of a tenant whose landlord is on Plot Yangu: the existing plan screens appear (progress, Pay now, Change how often) and a small payment still works. Back from there goes to the Pay Rent tenant screen.
++14. Landlord sign-in on the PAY site and a legacy-only tenant sign-in (they should land on their invoices after a moment's "Checking your account…", with no new questions).
+diff --git a/deploy-lmmx.sh b/deploy-lmmx.sh
+new file mode 100755
+index 0000000..c2a35c8
+--- /dev/null
++++ b/deploy-lmmx.sh
+@@ -0,0 +1,113 @@
++#!/usr/bin/env bash
++# Deploy the WhatsApp bot functions (codebase `default`, folder functions/) in small batches, the way PAY's
++# deploy-batches.sh does: retries with a growing cool-down, and a cool-down between batches.
++#
++# Run from the DESK repo root (the folder containing firebase.json), in Git Bash:
++#   bash deploy-lmmx.sh                      deploy the one function this change touched: whatsappWebhook
++#   bash deploy-lmmx.sh whatsappWebhook      the same, named explicitly
++#   bash deploy-lmmx.sh fnA fnB fnC fnD      any other `default` functions, batched (3 per deploy)
++#
++# Only `whatsappWebhook` changed (all of the bot lives behind it), so a plain `bash deploy-lmmx.sh` is the normal use.
++# functions-desk/ (codebase `desk`) is NOT touched here.
++#
++# Options (environment variables):
++#   BATCH_SIZE=3         functions per deploy
++#   RETRIES=3            attempts per batch
++#   PAUSE=30             seconds to cool down between batches
++#   RETRY_PAUSE=60       seconds before the first retry (doubles on each further retry)
++#   PROJECT=plot-9fd6e   Firebase project (default: whatever .firebaserc says)
++#   CODEBASE=default     functions codebase in firebase.json
++#   DRY_RUN=1            print the batches and exit without deploying
++
++set -u
++
++BATCH_SIZE="${BATCH_SIZE:-3}"
++RETRIES="${RETRIES:-3}"
++PAUSE="${PAUSE:-30}"
++RETRY_PAUSE="${RETRY_PAUSE:-60}"
++PROJECT="${PROJECT:-}"
++CODEBASE="${CODEBASE:-default}"
++
++# More heap for the CLI and a longer code-analysis timeout (the "Cannot determine backend specification" error)
++export NODE_OPTIONS="--max-old-space-size=4096"
++export FUNCTIONS_DISCOVERY_TIMEOUT="${FUNCTIONS_DISCOVERY_TIMEOUT:-120}"
++
++PROJECT_ARGS=()
++[ -n "$PROJECT" ] && PROJECT_ARGS=(--project "$PROJECT")
++
++if [ "$#" -gt 0 ]; then
++  FUNCS=("$@")
++else
++  FUNCS=(whatsappWebhook)
++fi
++
++total=${#FUNCS[@]}
++batches=$(( (total + BATCH_SIZE - 1) / BATCH_SIZE ))
++echo "Deploying $total function(s) from codebase '$CODEBASE' in $batches batch(es) of up to $BATCH_SIZE"
++echo "Retries per batch: $RETRIES | cool-down between batches: ${PAUSE}s | first retry wait: ${RETRY_PAUSE}s (doubles)"
++
++if [ "${DRY_RUN:-0}" = "1" ]; then
++  i=0; n=0
++  while [ "$i" -lt "$total" ]; do
++    n=$((n + 1))
++    echo "  Batch $n: ${FUNCS[*]:$i:$BATCH_SIZE}"
++    i=$((i + BATCH_SIZE))
++  done
++  exit 0
++fi
++
++failed=()
++succeeded=0
++i=0
++batch_no=0
++while [ "$i" -lt "$total" ]; do
++  batch=("${FUNCS[@]:$i:$BATCH_SIZE}")
++  batch_no=$((batch_no + 1))
++  only=$(printf "functions:${CODEBASE}:%s," "${batch[@]}")
++  only="${only%,}"
++
++  echo
++  echo "=== Batch $batch_no/$batches: ${batch[*]} ==="
++
++  ok=0
++  attempt=1
++  wait_s="$RETRY_PAUSE"
++  while [ "$attempt" -le "$RETRIES" ]; do
++    if firebase deploy --only "$only" --non-interactive "${PROJECT_ARGS[@]}"; then
++      ok=1
++      break
++    fi
++    echo "Batch $batch_no failed (attempt $attempt/$RETRIES)."
++    attempt=$((attempt + 1))
++    if [ "$attempt" -le "$RETRIES" ]; then
++      echo "Cooling down ${wait_s}s before retry..."
++      sleep "$wait_s"
++      wait_s=$((wait_s * 2))
++    fi
++  done
++
++  if [ "$ok" -eq 1 ]; then
++    succeeded=$((succeeded + ${#batch[@]}))
++  else
++    failed+=("${batch[@]}")
++  fi
++
++  i=$((i + BATCH_SIZE))
++  if [ "$i" -lt "$total" ]; then
++    echo "Cooling down ${PAUSE}s before the next batch..."
++    sleep "$PAUSE"
++  fi
++done
++
++echo
++echo "Deployed $succeeded of $total function(s)."
++if [ "${#failed[@]}" -eq 0 ]; then
++  echo "All batches deployed."
++else
++  echo "These functions failed:"
++  printf '  %s\n' "${failed[@]}"
++  echo
++  echo "Re-run just those with:"
++  echo "  bash deploy-lmmx.sh ${failed[*]}"
++  exit 1
++fi
+diff --git a/functions/src/__tests__/lmmx/lmmx.test.ts b/functions/src/__tests__/lmmx/lmmx.test.ts
+new file mode 100644
+index 0000000..faa7ffa
+--- /dev/null
++++ b/functions/src/__tests__/lmmx/lmmx.test.ts
+@@ -0,0 +1,290 @@
++/**
++ * Lipa Mdogo Mdogo (standalone) on the bot: signing vector, code routing from every state, menu routing, lookup results,
++ * the standalone happy path and each failure path, Join, and the English/Swahili copy. Runs the REAL webhook through the
++ * shared Rig with LMMX_MOCK=1 (fixtures in services/lmmx.client.ts); failure paths stub single client functions.
++ */
++import { test, describe, beforeEach, afterEach } from 'node:test';
++import assert from 'node:assert/strict';
++import { Rig, PHONE, TENANT_ID } from '../ui/rig';
++import { STATE } from '../../constants/states';
++import { LMMX_LABELS, LMMX_MESSAGES, lmxl, lmxm } from '../../constants/lmmx.messages';
++import { MESSAGES } from '../../constants/messages';
++import { UI_LABELS, UI_MESSAGES } from '../../constants/ui.messages';
++import { LmmxBotError, signBotCall } from '../../services/lmmx.client';
++import { LMMX, kes, parseLmmxCode, quoteInstalment } from '../../types/lmmx.contract';
++import * as client from '../../services/lmmx.client';
++import * as rentPay from '../../services/payment.service';
++
++process.env.LMMX_MOCK = '1';
++const ORIG = { lookup: client.lookup, quote: client.quote, pay: client.pay, confirmCode: client.confirmCode, joinInfo: client.joinInfo, ccf: rentPay.callCloudFunction };
++// eslint-disable-next-line @typescript-eslint/no-explicit-any
++const stub = (name: keyof typeof ORIG | 'callCloudFunction', fn: any) => { ((name === 'callCloudFunction' ? rentPay : client) as any)[name] = fn; };
++const LANGS = ['en', 'sw'] as const;
++const MENU = (lang: 'en' | 'sw' = 'en') => new Rig({ lang, state: STATE.MAIN_MENU });
++const quoteFor = (credit: number) => quoteInstalment({ creditMinor: credit, rentMinor: 1_000_000, channel: 'till', remainingRentMinor: 750_000 });
++
++beforeEach(() => { process.env.LMMX_MOCK = '1'; });
++afterEach(() => { stub('lookup', ORIG.lookup); stub('quote', ORIG.quote); stub('pay', ORIG.pay); stub('confirmCode', ORIG.confirmCode); stub('joinInfo', ORIG.joinInfo); stub('callCloudFunction', ORIG.ccf); });
++
++describe('signing (contract S4)', () => {
++  test('the exact test vector from the contract', () => {
++    const payload = { phone: '+254712345678', idNumber: '12345678' };
++    const a = signBotCall('lmmx_bot_lookup', payload, 'test-bot-key', 1700000000000, 'n0nce-abc123');
++    assert.equal(a.sig, 'da588a8808fbc5628fc90532e2fb078e1d10b7307ae6ed15b9b252cb121851f7');
++    assert.equal(a.ts, 1700000000000);
++    assert.equal(a.nonce, 'n0nce-abc123');
++  });
++  test('ts, nonce and sig in the payload never change the signature', () => {
++    const base = { phone: '+254712345678', idNumber: '12345678' };
++    const a = signBotCall('lmmx_bot_lookup', base, 'k', 1, 'n');
++    const b = signBotCall('lmmx_bot_lookup', { ...base, ts: 9, nonce: 'x', sig: 'y' }, 'k', 1, 'n');
++    assert.equal(a.sig, b.sig);
++  });
++  test('without LMMX_BOT_KEY a live call fails closed and sends nothing', async () => {
++    process.env.LMMX_MOCK = '0';
++    let sent = false;
++    stub('callCloudFunction', async () => { sent = true; return {}; });
++    delete process.env.LMMX_BOT_KEY;
++    await assert.rejects(client.lookup('+254712345678', '12345678'), /LMMX_BOT_KEY/);
++    assert.equal(sent, false);
++  });
++  test('a live call carries ts, nonce and a valid sig, and PAY errors keep their lmmx code', async () => {
++    process.env.LMMX_MOCK = '0';
++    process.env.LMMX_BOT_KEY = 'test-bot-key';
++    let seen: any; let url = '';
++    stub('callCloudFunction', async (u: string, d: any) => { url = u; seen = d; return { error: { message: 'slow down', details: { lmmx: 'LMMX_E_RATE' } } }; });
++    await assert.rejects(client.lookup('+254712345678', '12345678'), (e: any) => e instanceof LmmxBotError && e.code === 'LMMX_E_RATE');
++    assert.match(url, /africa-south1-plot-9fd6e\.cloudfunctions\.net\/lmmx_bot_lookup$/);
++    assert.deepEqual(signBotCall('lmmx_bot_lookup', { phone: '+254712345678', idNumber: '12345678' }, 'test-bot-key', seen.ts, seen.nonce).sig, seen.sig);
++    delete process.env.LMMX_BOT_KEY;
++  });
++});
++
++describe('codes are understood from every state without moving the user', () => {
++  test('LMM4683 from every state: setup confirmed, state and context untouched', async () => {
++    for (const state of Object.values(STATE)) {
++      const r = new Rig({ state });
++      r.context = { keep: 'me' };
++      await r.say('LMM4683');
++      assert.equal(r.state, state, `state ${state}`);
++      assert.deepEqual(r.context, { keep: 'me' }, `context ${state}`);
++      assert.match(r.allText(), /Lipa Mdogo Mdogo is on/, `reply ${state}`);
++    }
++  });
++  test('forgiving spelling and every result, in English and Swahili', async () => {
++    const cases: [string, RegExp, RegExp][] = [
++      ['lmm 4683', /is on/, /imewashwa/], ['LMM-4683', /is on/, /imewashwa/], ['  LMM4683  ', /is on/, /imewashwa/],
++      ['LMM5555', /Change confirmed/, /Mabadiliko yamethibitishwa/], ['LMC4683', /cancelled/, /yamefutwa/],
++      ['LMM1111', /not right/, /si sahihi/], ['LMM0000', /expired/, /umeisha muda/], ['LMM9999', /locked/, /umesimamishwa/], ['LMM2222', /could not match/, /Hatukuweza kuhusisha/],
++    ];
++    for (const [text, en, sw] of cases) {
++      const a = MENU('en'); await a.say(text); assert.match(a.allText(), en, text);
++      const b = MENU('sw'); await b.say(text); assert.match(b.allText(), sw, text);
++    }
++  });
++  test('the server summary is shown, and a code is not mistaken for other input', async () => {
++    const r = MENU(); await r.say('LMM4683');
++    assert.match(r.allText(), /Rent KES 10,000 due on the 5th/);
++    assert.equal(parseLmmxCode('4683'), null); // a bare number is an amount or menu choice, never a code
++    assert.equal(parseLmmxCode('LMM 46830'), null);
++    const n = MENU(); await n.say('4683'); assert.equal(n.state, STATE.MAIN_MENU); assert.doesNotMatch(n.allText(), /Lipa Mdogo Mdogo is on/);
++  });
++  test('works mid-payment and the payment screen is not disturbed', async () => {
++    const r = MENU(); await r.say('9'); await r.say('11111111'); await r.tap('Pay now'); await r.say('LMM4683');
++    assert.equal(r.state, STATE.LMMX_AMOUNT);
++    assert.match(r.allText(), /is on/);
++  });
++  test('PAY being down gives a calm retry message, still without moving the user', async () => {
++    stub('confirmCode', async () => { throw new LmmxBotError('down'); });
++    const r = MENU('sw'); await r.say('LMM4683');
++    assert.equal(r.state, STATE.MAIN_MENU); assert.match(r.allText(), /Hatukuweza kuhakiki/);
++  });
++});
++
++describe('main menu routing', () => {
++  test('9 opens Lipa Mdogo Mdogo, 10 opens Join, and the old numbers still work', async () => {
++    const a = MENU(); await a.say('9'); assert.equal(a.state, STATE.LMMX_ID); assert.match(a.allText(), /ID number/);
++    const b = MENU(); await b.say('10'); assert.equal(b.state, STATE.LMMX_JOIN); assert.match(b.allText(), /0791286165/);
++    const c = MENU(); await c.say('1'); assert.equal(c.state, STATE.PAY_RENT_WAITING_ID);
++    const d = MENU(); await d.say('2'); assert.equal(d.state, STATE.GET_INVOICE_WAITING_ID);
++    const e = MENU(); await e.say('6'); assert.equal(e.state, STATE.HELP_MENU);
++    const f = MENU(); await f.say('5'); assert.equal(f.state, STATE.IDLE);
++    const g = MENU(); await g.say('11'); assert.equal(g.state, STATE.MAIN_MENU); // out of range: the menu again
++  });
++  test('tapping the new rows works too, and Pay Rent and Lipa Mdogo Mdogo read differently', async () => {
++    const r = MENU(); await r.say('#'); await r.tap('Lipa Mdogo Mdogo'); assert.equal(r.state, STATE.LMMX_ID);
++    const j = MENU('sw'); await j.say('#'); await j.tap('Jiunge Lipa Mdogo Mdogo'); assert.equal(j.state, STATE.LMMX_JOIN);
++    const m = MENU(); await m.say('#');
++    const rows = m.lastInteractive().kind === 'list' ? (m.lastInteractive() as any).rows : [];
++    const desc = (t: string) => rows.find((x: any) => x.title === t).description;
++    assert.match(desc('Pay Rent'), /invoice now/); assert.match(desc('Lipa Mdogo Mdogo'), /small amounts/);
++  });
++  test('Join shows PAY\'s text and numbers, and still tells them how to join if PAY is down', async () => {
++    const ok = MENU(); await ok.say('10'); assert.match(ok.allText(), /Your landlord does not need to join/); assert.match(ok.allText(), /0101716473/); assert.deepEqual(ok.titles(), ['Main menu']);
++    stub('joinInfo', async () => { throw new LmmxBotError('down'); });
++    const down = MENU('sw'); await down.say('10'); assert.match(down.allText(), /wakala wa Samuhia/); assert.match(down.allText(), /0791286165/);
++    await down.tap('Menyu kuu'); assert.equal(down.state, STATE.MAIN_MENU);
++  });
++});
++
++describe('lookup results', () => {
++  const enter = async (id: string, lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say(id); return r; };
++  test('standalone: status with rent, balance, due and pay-by dates', async () => {
++    const r = await enter('11111111');
++    assert.equal(r.state, STATE.LMMX_HOME);
++    assert.match(r.body(), /Hello Mary/); assert.match(r.body(), /KES 10,000/); assert.match(r.body(), /KES 7,500/); assert.match(r.body(), /5 Dec/); assert.match(r.body(), /2 Dec/);
++    assert.match(r.body(), /Pay by 2 Dec so your landlord gets all of it on 5 Dec/);
++    assert.deepEqual(r.titles(), ['Pay now', 'Back', 'Main menu']);
++  });
++  test('none (also a phone and ID mismatch): friendly not-found with three ways forward', async () => {
++    const r = await enter('99999999');
++    assert.equal(r.state, STATE.LMMX_NOTFOUND); assert.match(r.body(), /could not find an account/);
++    assert.deepEqual(r.titles(), ['Try again', 'Join Lipa Mdogo', 'Main menu']);
++    await r.tap('Try again'); assert.equal(r.state, STATE.LMMX_ID);
++    const j = await enter('99999999'); await j.tap('Join Lipa Mdogo'); assert.equal(j.state, STATE.LMMX_JOIN);
++    const sw = await enter('99999999', 'sw'); assert.deepEqual(sw.titles(), ['Jaribu tena', 'Jiunge Lipa Mdogo', 'Menyu kuu']);
++  });
++  test('the answer is the same for "not found" and "wrong phone": the bot adds nothing that tells them apart', async () => {
++    const a = await enter('99999999'); const b = await enter('88888888');
++    assert.equal(a.body(), b.body());
++  });
++  test('frozen: on hold, contact support', async () => {
++    const r = await enter('33333333'); assert.match(r.body(), /on hold/); assert.match(r.body(), /0791286165/); assert.deepEqual(r.titles(), ['Main menu']);
++    const sw = await enter('33333333', 'sw'); assert.match(sw.body(), /imesitishwa/);
++  });
++  test('awaiting setup: send the code from the SMS, and sending it works from that very screen', async () => {
++    const r = await enter('44444444'); assert.match(r.body(), /send the code from your SMS/); assert.match(r.body(), /LMM1234/);
++    await r.say('LMM4683'); assert.match(r.allText(), /is on/); assert.equal(r.state, STATE.LMMX_DONE);
++  });
++  test('legacy: the existing plan flow starts, using the same lookup as Pay Rent', async () => {
++    stub('lookup', async () => ({ kind: 'legacy' }));
++    stub('callCloudFunction', async (url: string) => url.endsWith('lmm_getPlan')
++      ? { available: true, plan: { frequency: 'weekly', status: 'active', targetMinor: 1_550_000, creditedMinor: 300_000, remainingMinor: 1_250_000, pct: 19, settlesOn: '2026-11-05', suggestedMinor: 300_000 } } : {});
++    const r = await enter(TENANT_ID);
++    assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Lipa Mdogo Mdogo/); assert.match(r.body(), /KES 15,500/);
++    assert.equal(r.context.assetId, 'asset1');
++  });
++  test('legacy lookup says legacy but the tenant is not in PMS: not found, not a crash', async () => {
++    stub('lookup', async () => ({ kind: 'legacy' }));
++    const r = await enter('77777777'); assert.equal(r.state, STATE.LMMX_NOTFOUND);
++  });
++  test('a bad ID is refused before PAY is asked; PAY errors and PAY being down are explained', async () => {
++    let calls = 0; stub('lookup', async () => { calls++; return { kind: 'none' }; });
++    const r = MENU(); await r.say('9'); await r.say('12'); assert.equal(r.state, STATE.LMMX_ID); assert.match(r.body(), /not look like a valid ID/); assert.equal(calls, 0);
++    stub('lookup', async () => { throw new LmmxBotError('x', 'LMMX_E_RATE'); });
++    await r.say('11111111'); assert.equal(r.state, STATE.LMMX_NOTFOUND); assert.match(r.body(), /Too many tries/); assert.deepEqual(r.titles(), ['Try again', 'Main menu']);
++    stub('lookup', async () => { throw new LmmxBotError('x', 'LMMX_E_DISABLED'); });
++    const d = await enter('11111111'); assert.match(d.body(), /not available right now/);
++    stub('lookup', async () => { throw new LmmxBotError('x'); });
++    const e = await enter('11111111', 'sw'); assert.match(e.body(), /Kuna tatizo upande wetu/);
++  });
++});
++
++describe('standalone flow', () => {
++  const toAmount = async (lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say('11111111'); await r.tap(lang === 'en' ? 'Pay now' : 'Lipa sasa'); return r; };
++  test('happy path with the suggested amount: quote shows rent, fees and total from PAY, then STK', async () => {
++    const q = quoteFor(250_000);
++    const r = await toAmount();
++    assert.equal(r.state, STATE.LMMX_AMOUNT); assert.match(r.body(), /Suggested: KES 2,500/); assert.deepEqual(r.titles(), ['Pay KES 2,500', 'Back', 'Main menu']);
++    await r.tap('Pay KES 2,500');
++    assert.equal(r.state, STATE.LMMX_PHONE);
++    assert.match(r.body(), /Goes to your rent: KES 2,500/); assert.match(r.body(), new RegExp(`Fees: ${kes(q.feesMinor)}`)); assert.match(r.body(), new RegExp(`You pay: ${kes(q.chargeMinor)}`));
++    assert.deepEqual(r.titles(), ['Use 0712345678', 'Back', 'Main menu']);
++    await r.tap('Use 0712345678');
++    assert.equal(r.state, STATE.LMMX_CONFIRM); assert.match(r.body(), /M-Pesa number: 0712345678/);
++    await r.tap('Confirm');
++    assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /M-Pesa prompt sent to 0712345678/); assert.match(r.body(), new RegExp(kes(q.chargeMinor)));
++    assert.doesNotMatch(r.body(), /received|successful|paid in full/i); // the bot never claims success: PAY's SMS does
++    assert.deepEqual(r.titles(), ['Check balance', 'Pay more', 'Main menu']);
++  });
++  test('typed amount and another payer number; the pay call gets the quote id, the ID and the payer in E.164', async () => {
++    let seen: any; stub('pay', async (...a: any[]) => { seen = a; return ORIG.pay(a[0], a[1], a[2], a[3]); });
++    const r = await toAmount(); await r.say('KES 1,000'); assert.equal(r.state, STATE.LMMX_PHONE);
++    await r.say('0733445566'); await r.say('YES');
++    assert.deepEqual(seen, ['+254712345678', '11111111', 'mock-quote-100000', '+254733445566']);
++    assert.equal(r.state, STATE.LMMX_DONE);
++  });
++  test('Check balance and Pay more after paying', async () => {
++    const r = await toAmount(); await r.say('500'); await r.tap('Use 0712345678'); await r.tap('Confirm');
++    await r.tap('Check balance'); assert.equal(r.state, STATE.LMMX_HOME);
++    await r.tap('Pay now'); await r.say('500'); await r.say('ME'); await r.say('YES');
++    await r.tap('Pay more'); assert.equal(r.state, STATE.LMMX_AMOUNT);
++  });
++  test('amount rules: whole shillings, at least KES 10, at most KES 150,000; PAY decides the rest', async () => {
++    const r = await toAmount();
++    for (const bad of ['abc', '9', '12.5', '150001', '-50']) { await r.say(bad); assert.equal(r.state, STATE.LMMX_AMOUNT, bad); assert.match(r.body(), /whole number of shillings between KES 10 and KES 150,000/, bad); }
++    await r.say('8000'); // more than the KES 7,500 balance: PAY refuses
++    assert.equal(r.state, STATE.LMMX_AMOUNT); assert.match(r.body(), /cannot be paid right now/);
++    await r.say('10'); assert.equal(r.state, STATE.LMMX_PHONE); // the minimum is accepted
++  });
++  test('invalid M-Pesa number and a typed word at the confirm step are explained', async () => {
++    const r = await toAmount(); await r.say('500');
++    for (const bad of ['12345', '0812345678', '+254712345678x']) { await r.say(bad); assert.equal(r.state, STATE.LMMX_PHONE, bad); assert.match(r.body(), /not valid/); }
++    await r.say('0712345678'); await r.say('maybe'); assert.equal(r.state, STATE.LMMX_CONFIRM); assert.match(r.body(), /Confirm/);
++  });
++  test('PAY refuses the payment: explained, nothing claimed, retry offered', async () => {
++    const r = await toAmount(); await r.say('500'); await r.say('0700000000'); await r.say('YES');
++    assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /cannot take a payment right now/); assert.match(r.body(), /0791286165/);
++    assert.deepEqual(r.titles(), ['Check balance', 'Pay more', 'Main menu']);
++  });
++  test('PAY does not answer in time: the user is told it is unknown and to check before paying again', async () => {
++    const r = await toAmount(); await r.say('500'); await r.say('0711111111'); await r.say('YES');
++    assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /could not confirm if the M-Pesa prompt was sent/); assert.match(r.body(), /do not pay twice/);
++  });
++  test('any other failure says nothing was taken', async () => {
++    stub('pay', async () => { throw new LmmxBotError('boom'); });
++    const r = await toAmount(); await r.say('500'); await r.say('ME'); await r.say('YES');
++    assert.match(r.body(), /Nothing is taken from your M-Pesa until you enter your PIN/);
++  });
++  test('an expired quote is refreshed and shown again before anything is charged', async () => {
++    let paid = 0; let n = 0;
++    stub('quote', async (p: string, id: string, c: number) => { const q = await ORIG.quote(p, id, c); return n++ === 0 ? { ...q, expiresAt: Date.now() - 1000 } : q; });
++    stub('pay', async (...a: any[]) => { paid++; return ORIG.pay(a[0], a[1], a[2], a[3]); });
++    const r = await toAmount(); await r.say('500'); await r.say('ME'); await r.say('YES');
++    assert.equal(paid, 0); assert.equal(r.state, STATE.LMMX_CONFIRM); assert.match(r.body(), /price was refreshed/);
++    await r.say('YES'); assert.equal(paid, 1); assert.equal(r.state, STATE.LMMX_DONE);
++  });
++  test('0 goes back one step at a time, # is the main menu, 00 restarts, 000 leaves', async () => {
++    const r = await toAmount(); await r.say('500'); await r.say('ME');
++    assert.equal(r.state, STATE.LMMX_CONFIRM); await r.say('0'); assert.equal(r.state, STATE.LMMX_PHONE);
++    await r.say('0'); assert.equal(r.state, STATE.LMMX_AMOUNT); await r.say('0'); assert.equal(r.state, STATE.LMMX_HOME);
++    await r.say('0'); assert.equal(r.state, STATE.LMMX_ID); await r.say('0'); assert.equal(r.state, STATE.MAIN_MENU);
++    const a = await toAmount(); await a.say('#'); assert.equal(a.state, STATE.MAIN_MENU); assert.deepEqual(a.context, {});
++    const b = await toAmount(); await b.say('00'); assert.equal(b.state, STATE.MAIN_MENU);
++    const c = await toAmount(); await c.say('000'); assert.equal(c.state, STATE.LANGUAGE_SELECTION);
++  });
++  test('Swahili happy path', async () => {
++    const r = await toAmount('sw'); assert.match(r.body(), /Ilipendekezwa: KES 2,500/);
++    await r.tap('Lipa KES 2,500'); assert.match(r.body(), /Inaenda kwenye kodi yako/); await r.tap('Tumia 0712345678'); assert.match(r.body(), /Namba ya M-Pesa/);
++    await r.tap('Thibitisha'); assert.match(r.body(), /Ombi la M-Pesa limetumwa/); assert.deepEqual(r.titles(), ['Angalia salio', 'Lipa zaidi', 'Menyu kuu']);
++  });
++  test('the session keeps no ID or quote after leaving', async () => {
++    const r = await toAmount(); await r.say('500'); await r.say('#'); assert.deepEqual(r.context, {});
++  });
++});
++
++describe('copy', () => {
++  const holes = (t: string) => (t.match(/\{(\w+)\}/g) ?? []).sort().join(',');
++  test('every message and label exists in English and Swahili, with the same placeholders', () => {
++    for (const [k, v] of Object.entries({ ...LMMX_MESSAGES, ...LMMX_LABELS })) {
++      assert.ok(v.en.trim() && v.sw.trim(), k);
++      assert.equal(holes(v.en), holes(v.sw), k);
++    }
++  });
++  test('every new key resolves through lmxm and lmxl in both languages, with no unfilled placeholder but the documented ones', () => {
++    for (const lang of LANGS) {
++      for (const k of Object.keys(LMMX_MESSAGES)) assert.doesNotMatch(lmxm(k as any, lang, { text: 't', phones: 'p', name: 'n', rent: 'r', balance: 'b', due: 'd', payby: 'p', min: '1', max: '2', suggested: 's', credit: 'c', fees: 'f', charge: 'g', phone: '0', summary: '' }), /\{\w+\}/, k);
++      for (const k of Object.keys(LMMX_LABELS)) assert.ok(lmxl(k as any, lang, { amount: 'KES 1,250,000,000' }).length <= 20, k);
++    }
++  });
++  test('the brand is Lipa Mdogo Mdogo everywhere a tenant reads it; "Lipa Mos Mos" is gone', () => {
++    const all = JSON.stringify([LMMX_MESSAGES, LMMX_LABELS, MESSAGES, UI_LABELS, UI_MESSAGES]);
++    assert.doesNotMatch(all, /Mos Mos/);
++    assert.equal(LMMX.OTP_PREFIX, 'LMM');
++  });
++  test('menu labels fit WhatsApp limits (button 20, row title 24, description 72)', async () => {
++    const r = MENU(); await r.say('#');
++    for (const row of (r.lastInteractive() as any).rows) { assert.ok(row.title.length <= 24, row.title); assert.ok(row.description.length <= 72, row.description); }
++    void PHONE;
++  });
++});
+diff --git a/functions/src/__tests__/ui/flows.test.ts b/functions/src/__tests__/ui/flows.test.ts
+index 5a5c957..740b1bb 100644
+--- a/functions/src/__tests__/ui/flows.test.ts
++++ b/functions/src/__tests__/ui/flows.test.ts
+@@ -19,7 +19,7 @@ describe('language and main menu', () => {
+     assert.equal(r.state, STATE.MAIN_MENU);
+     assert.equal(r.lastInteractive().kind, 'list');
+     assert.ok(r.titles().includes('Lipa Kodi'));
+-    assert.equal(r.titles().length, 8);
++    assert.equal(r.titles().length, 10);
+   });
+ 
+   test('typed numbers still work: 6 opens Help, then Main menu returns', async () => {
+@@ -30,7 +30,7 @@ describe('language and main menu', () => {
+     assert.deepEqual(r.titles(), ['Main menu']);
+     await r.tap('Main menu');
+     assert.equal(r.state, STATE.MAIN_MENU);
+-    assert.equal(r.titles().length, 8);
++    assert.equal(r.titles().length, 10);
+   });
+ 
+   test('Help: any message returns to the main menu (it used to fall into "Unknown state")', async () => {
+@@ -110,7 +110,7 @@ describe('Pay Rent', () => {
+     assert.equal(r.state, STATE.PAY_RENT_MPESA);
+     assert.match(r.body(), /Jane Wanjiru/);
+     assert.match(r.body(), /15,500/);
+-    assert.deepEqual(r.titles(), ['Pay in full', 'Lipa Mos Mos', 'Search again', 'Main menu']);
++    assert.deepEqual(r.titles(), ['Pay in full', 'Search again', 'Main menu']);
+ 
+     await r.tap('Pay in full');
+     assert.equal(r.state, STATE.PAY_RENT_AMOUNT);
+@@ -175,7 +175,7 @@ describe('Pay Rent', () => {
+     await r.say(TENANT_ID);
+     assert.match(r.body(), /Mpangaji amepatikana/);
+     assert.doesNotMatch(r.body(), /[Mm]kokoteni/);
+-    assert.deepEqual(r.titles(), ['Lipa kikamilifu', 'Lipa Mos Mos', 'Tafuta tena', 'Menyu kuu']);
++    assert.deepEqual(r.titles(), ['Lipa kikamilifu', 'Tafuta tena', 'Menyu kuu']);
+   });
+ });
+ 
+@@ -227,7 +227,7 @@ describe('My Chama', () => {
+     await r.say('3');
+     await r.tap('Cancel');
+     assert.equal(r.state, STATE.MAIN_MENU);
+-    assert.equal(r.titles().length, 8);
++    assert.equal(r.titles().length, 10);
+   });
+ 
+   test('contribution: paged picker (12 periods), pick the 9th on page 2, pay in full through phone, network and confirm', async () => {
+@@ -346,7 +346,7 @@ describe('Landlord Watch hand-off', () => {
+     assert.equal(r.state, STATE.MAIN_MENU);
+     const last = r.sent[r.sent.length - 1];
+     assert.equal(last.kind, 'list');
+-    assert.equal(last.kind === 'list' && last.rows.length, 8);
++    assert.equal(last.kind === 'list' && last.rows.length, 10);
+   });
+ 
+   test('a stale main-menu tap while inside Landlord Watch is answered with the notice', async () => {
+@@ -360,29 +360,38 @@ describe('Landlord Watch hand-off', () => {
+ });
+ 
+ 
+-describe('Lipa Mos Mos (pay rent a little at a time)', () => {
++describe('Lipa Mdogo Mdogo (pay rent a little at a time)', () => {
+   const rentPay = require('../../services/payment.service');
+   const calls: { name: string; data: any }[] = [];
+   const install = (impl: (name: string, data: any) => any) => {
+     rentPay.callCloudFunction = async (url: string, data: any) => { const name = url.split('/').pop() as string; calls.push({ name, data }); return impl(name, data); };
+   };
+   const planView = (over: any = {}) => ({ frequency: 'weekly', status: 'active', targetMinor: 1_550_000, creditedMinor: 300_000, remainingMinor: 1_250_000, pct: 19, settlesOn: '2026-11-05', suggestedMinor: 300_000, ...over });
++  // The legacy plan flow is now reached from the main menu (Lipa Mdogo Mdogo, option 9): the ID is looked up with PAY, and an
++  // answer of `legacy` (landlord on Plot Yangu) starts the EXISTING flow, unchanged. The lookup answer is stubbed here.
++  const lmmxClient = require('../../services/lmmx.client');
+   const toTenant = async (lang: 'en' | 'sw' = 'en') => {
+-    const r = fresh(lang); await r.say('1'); await r.say(TENANT_ID); return r;
++    lmmxClient.lookup = async () => ({ kind: 'legacy' });
++    const r = fresh(lang); await r.say('9'); await r.say(TENANT_ID); return r;
+   };
+ 
+-  test('the tenant-found screen offers Lipa Mos Mos in English and Swahili', async () => {
++  test('Pay Rent no longer offers Lipa Mdogo Mdogo; the main menu does, in English and Swahili', async () => {
+     calls.length = 0;
+-    assert.ok((await toTenant('en')).titles().includes('Lipa Mos Mos'));
+-    assert.ok((await toTenant('sw')).titles().includes('Lipa Mos Mos'));
++    for (const lang of ['en', 'sw'] as const) {
++      const r = fresh(lang); await r.say('1'); await r.say(TENANT_ID);
++      assert.ok(!r.titles().includes('Lipa Mdogo Mdogo'));
++      assert.equal(r.titles().length, 3);
++      const m = fresh(lang); await m.say('#');
++      assert.ok(m.titles().includes('Lipa Mdogo Mdogo'));
++      assert.ok(m.titles().includes(lang === 'en' ? 'Join Lipa Mdogo Mdogo' : 'Jiunge Lipa Mdogo Mdogo'));
++    }
+   });
+ 
+   test('no plan yet: asks how often, starts the plan, then asks how much, previews the fee, and pays through PAY', async () => {
+     calls.length = 0;
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: null, targetMinor: 1_550_000, settlesOn: '2026-11-05', suggestedMinor: 300_000 }
+       : name === 'lmm_start' ? { available: true, plan: planView({ creditedMinor: 0 }) } : { reference: 'LMM_x', displayText: 'Enter PIN' });
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Pay your rent a little at a time/); assert.match(r.body(), /KES 15,500/);
++    const r = await toTenant(); assert.equal(r.state, STATE.LMM_MENU); assert.match(r.body(), /Pay your rent a little at a time/); assert.match(r.body(), /KES 15,500/);
+     assert.deepEqual(r.titles(), ['Daily', 'Weekly', 'Every 2 weeks', 'Back', 'Main menu']);
+     await r.tap('Weekly'); assert.equal(r.state, STATE.LMM_AMOUNT); assert.match(r.body(), /whole-shilling/);
+     await r.say('12.5'); assert.match(r.body(), /whole-shilling amount between KES 10/);
+@@ -398,8 +407,7 @@ describe('Lipa Mos Mos (pay rent a little at a time)', () => {
+ 
+   test('under KES 100 the preview shows the 5% fee', async () => {
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { reference: 'LMM_x', displayText: 'ok' });
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    assert.match(r.body(), /Progress: 19%/); assert.match(r.body(), /Balance: KES 12,500/);
++    const r = await toTenant(); assert.match(r.body(), /Progress: 19%/); assert.match(r.body(), /Balance: KES 12,500/);
+     await r.tap('Pay now'); await r.say('50'); await r.say('0712345678');
+     assert.match(r.body(), /Fee \(5%\): KES 3/); assert.match(r.body(), /You pay: KES 53/);
+   });
+@@ -407,48 +415,43 @@ describe('Lipa Mos Mos (pay rent a little at a time)', () => {
+   test('the payout date is shown as a readable date, and a plan under KES 300 shows the fee warning', async () => {
+     const fee = { kind: 'fee_from_rent', creditedMinor: 4_000, feeMinor: 3_000, netMinor: 1_000, thresholdMinor: 30_000 };
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 4_000, remainingMinor: 1_546_000, pct: 0, settlesOn: '2026-11-05', dueOn: '2026-11-05', payout: fee }) } : {});
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    assert.match(r.body(), /Landlord is paid by: 5 Nov 2026/); assert.doesNotMatch(r.body(), /2026-11-05/);
++    const r = await toTenant(); assert.match(r.body(), /Landlord is paid by: 5 Nov 2026/); assert.doesNotMatch(r.body(), /2026-11-05/);
+     assert.match(r.body(), /Under KES 300 paid/); assert.match(r.body(), /transfer fee of KES 30 is deducted/);
+     assert.match(r.body(), /only KES 10 of your KES 40 reaches your rent/); assert.match(r.body(), /still owe KES 30 on your invoice/);
+     assert.match(r.body(), /Pay KES 300 or more in total to avoid it/);
+-    const sw = await toTenant('sw'); await sw.tap('Lipa Mos Mos'); assert.match(sw.body(), /Chini ya KES 300 imelipwa/); assert.match(sw.body(), /ada ya uhamisho ya KES 30/);
++    const sw = await toTenant('sw'); assert.match(sw.body(), /Chini ya KES 300 imelipwa/); assert.match(sw.body(), /ada ya uhamisho ya KES 30/);
+   });
+ 
+   test('a plan holding less than can be sent says so; a plan at KES 300+ shows no warning', async () => {
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ creditedMinor: 3_000, payout: { kind: 'too_small', creditedMinor: 3_000, minMinor: 4_000, thresholdMinor: 30_000 } }) } : {});
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    assert.match(r.body(), /Not enough to send yet/); assert.match(r.body(), /least we can send your landlord is KES 40, and you have paid KES 30/);
++    const r = await toTenant(); assert.match(r.body(), /Not enough to send yet/); assert.match(r.body(), /least we can send your landlord is KES 40, and you have paid KES 30/);
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView({ payout: null }) } : {});
+-    const ok = await toTenant(); await ok.tap('Lipa Mos Mos'); assert.doesNotMatch(ok.body(), /Under KES|Not enough to send/);
++    const ok = await toTenant(); assert.doesNotMatch(ok.body(), /Under KES|Not enough to send/);
+   });
+ 
+   test('an existing plan shows progress; Back steps back one screen at a time', async () => {
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    await r.tap('Pay now'); assert.equal(r.state, STATE.LMM_AMOUNT);
++    const r = await toTenant(); await r.tap('Pay now'); assert.equal(r.state, STATE.LMM_AMOUNT);
+     await r.say('3000'); assert.equal(r.state, STATE.LMM_PHONE);
+     await r.tap('Back'); assert.equal(r.state, STATE.LMM_AMOUNT);
+     await r.tap('Back'); assert.equal(r.state, STATE.LMM_MENU);
+-    await r.tap('Back'); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.ok(r.titles().includes('Lipa Mos Mos'));
++    await r.tap('Back'); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.ok(!r.titles().includes('Lipa Mdogo Mdogo'));
+   });
+ 
+   test('not available for this landlord: says so and returns to the tenant screen', async () => {
+-    install(() => ({ available: false, reason: 'This landlord has not enabled Lipa Mos Mos yet.' }));
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos');
+-    assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.match(r.body(), /not available right now/); assert.match(r.body(), /has not enabled/);
++    install(() => ({ available: false, reason: 'This landlord has not enabled Lipa Mdogo Mdogo yet.' }));
++    const r = await toTenant(); assert.equal(r.state, STATE.PAY_RENT_MPESA); assert.match(r.body(), /not available right now/); assert.match(r.body(), /has not enabled/);
+   });
+ 
+   test('a PAY error is shown to the tenant and nothing is paid', async () => {
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : { error: { message: 'That is more than you owe. The balance is KES 12,500.' } });
+-    const r = await toTenant(); await r.tap('Lipa Mos Mos'); await r.tap('Pay now'); await r.say('3000'); await r.say('0712345678'); await r.tap('Confirm');
++    const r = await toTenant(); await r.tap('Pay now'); await r.say('3000'); await r.say('0712345678'); await r.tap('Confirm');
+     assert.match(r.allText(), /We could not complete that: That is more than you owe/);
+   });
+ 
+   test('Swahili screens', async () => {
+     install((name) => name === 'lmm_getPlan' ? { available: true, plan: planView() } : {});
+-    const r = await toTenant('sw'); await r.tap('Lipa Mos Mos');
+-    assert.match(r.body(), /Umelipa: KES 3,000 kati ya KES 15,500/); assert.deepEqual(r.titles(), ['Lipa sasa', 'Badilisha mara', 'Nyuma']);
++    const r = await toTenant('sw'); assert.match(r.body(), /Umelipa: KES 3,000 kati ya KES 15,500/); assert.deepEqual(r.titles(), ['Lipa sasa', 'Badilisha mara', 'Nyuma']);
+     await r.tap('Lipa sasa'); assert.match(r.body(), /shilingi kamili/);
+   });
+ });
+diff --git a/functions/src/__tests__/ui/ui.test.ts b/functions/src/__tests__/ui/ui.test.ts
+index 3900b06..0ea01bc 100644
+--- a/functions/src/__tests__/ui/ui.test.ts
++++ b/functions/src/__tests__/ui/ui.test.ts
+@@ -94,12 +94,12 @@ describe('pickers', () => {
+ });
+ 
+ describe('main menu and welcome', () => {
+-  test('main menu: all 8 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
++  test('main menu: all 10 options, Exit last, values are the legacy option numbers, ids pre-stamped', () => {
+     for (const lang of LANGS) {
+       const menu = mainMenuReply(lang);
+       const rows = rowsOf(menu);
+-      assert.equal(rows.length, 8);
+-      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '2', '3', '4', '5', '6', '7', '8']);
++      assert.equal(rows.length, 10);
++      assert.deepEqual(rows.map((r) => r.id.replace('ui:MAIN_MENU:', '')).sort(), ['1', '10', '2', '3', '4', '5', '6', '7', '8', '9']);
+       assert.equal(rows[rows.length - 1].id, 'ui:MAIN_MENU:5');
+       assert.ok(rows.every((r) => !!r.description));
+       assert.ok(!needsState(menu));
+@@ -117,7 +117,7 @@ describe('sender integration', () => {
+     const [m] = expandOutbound(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);
+     const payload = buildCloudPayload('254712345678', m) as { interactive: { type: string; action: { sections: Array<{ rows: unknown[] }> } } };
+     assert.equal(payload.interactive.type, 'list');
+-    assert.equal(payload.interactive.action.sections[0].rows.length, 8);
++    assert.equal(payload.interactive.action.sections[0].rows.length, 10);
+   });
+   test('typed fallback leads each line with what the user would type', () => {
+     const text = toNumberedText(stampReply(mainMenuReply('en'), STATE.MAIN_MENU)[0]);
+diff --git a/functions/src/constants/lmmx.messages.ts b/functions/src/constants/lmmx.messages.ts
+new file mode 100644
+index 0000000..6877cd3
+--- /dev/null
++++ b/functions/src/constants/lmmx.messages.ts
+@@ -0,0 +1,168 @@
++/**
++ * Lipa Mdogo Mdogo for standalone tenants (LMMX): copy, English + Kiswahili.
++ * Labels stay within 20 characters so they are valid as reply buttons (enforced by __tests__/lmmx/lmmx.test.ts).
++ * Amounts, dates and names are filled in by the handler from what PAY returns; this file holds no numbers of its own
++ * except the support phone (the same one the Help screen shows).
++ */
++import { Lang } from '../types/watch.types';
++import { fill } from '../utils/watch.format';
++
++type Bi = { en: string; sw: string };
++
++export const LMMX_SUPPORT_PHONE = '0791286165';
++
++export const LMMX_LABELS = {
++  TRY_AGAIN: { en: 'Try again', sw: 'Jaribu tena' },
++  JOIN: { en: 'Join Lipa Mdogo', sw: 'Jiunge Lipa Mdogo' },
++  CHECK: { en: 'Check balance', sw: 'Angalia salio' },
++  PAY_MORE: { en: 'Pay more', sw: 'Lipa zaidi' },
++  PAY_AMOUNT: { en: 'Pay {amount}', sw: 'Lipa {amount}' },
++} satisfies Record<string, Bi>;
++
++export type LmmxLabelKey = keyof typeof LMMX_LABELS;
++
++/** Button label, cut to the WhatsApp limit of 20 characters (an amount such as "KES 1,250,000" could otherwise overflow it). */
++export function lmxl(key: LmmxLabelKey, lang: Lang, params?: Record<string, string | number>): string {
++  return fill(LMMX_LABELS[key][lang], params).slice(0, 20);
++}
++
++export const LMMX_MESSAGES = {
++  ASK_ID: {
++    en: '*Lipa Mdogo Mdogo* 🪙\n\nPay your rent in small amounts, at your own pace.\n\nPlease type your *ID number* (the one you gave when you signed up).\n\nSend *0* to go back or *#* for the main menu.',
++    sw: '*Lipa Mdogo Mdogo* 🪙\n\nLipa kodi yako kwa awamu ndogo, kwa kasi yako.\n\nTafadhali andika *namba yako ya kitambulisho* (ile ulioipa ulipojiunga).\n\nTuma *0* kurudi nyuma au *#* kwenda menyu kuu.',
++  },
++  BAD_ID: {
++    en: 'That does not look like a valid ID number. Please check it and type it again.',
++    sw: 'Hiyo haionekani kuwa namba sahihi ya kitambulisho. Tafadhali iangalie na uiandike tena.',
++  },
++  NOT_FOUND: {
++    en: '*Lipa Mdogo Mdogo*\n\nWe could not find an account for this WhatsApp number and ID. Check the ID, and use the same phone number you gave when you signed up. Or join below.',
++    sw: '*Lipa Mdogo Mdogo*\n\nHatukupata akaunti ya namba hii ya WhatsApp na kitambulisho hiki. Angalia kitambulisho, na utumie namba ile ile ya simu uliyotoa ulipojiunga. Au jiunge hapa chini.',
++  },
++  FROZEN: {
++    en: '*Lipa Mdogo Mdogo*\n\nYour account is on hold for now. Please contact support on {phone}.',
++    sw: '*Lipa Mdogo Mdogo*\n\nAkaunti yako imesitishwa kwa sasa. Tafadhali wasiliana na msaada kwa {phone}.',
++  },
++  AWAITING: {
++    en: '*Lipa Mdogo Mdogo*\n\nYour sign-up is almost done. Please send the code from your SMS (it looks like *LMM1234*) in this chat to switch on your account.\n\nIf the code has expired, ask your Samuhia desk agent for a new one.',
++    sw: '*Lipa Mdogo Mdogo*\n\nKujiunga kwako kumekaribia kukamilika. Tafadhali tuma msimbo kutoka kwenye SMS yako (unaonekana kama *LMM1234*) kwenye mazungumzo haya ili kuwasha akaunti yako.\n\nIkiwa msimbo umeisha muda, mwombe wakala wako wa Samuhia akutumie mpya.',
++  },
++  HOME: {
++    en: '*Lipa Mdogo Mdogo* 🪙\n\nHello {name}.\n\n🏠 Monthly rent: {rent}\n⚖️ Still to pay: {balance}\n📅 Rent due: {due}\n⏰ Pay by: {payby}\n\nPay by {payby} so your landlord gets all of it on {due}.',
++    sw: '*Lipa Mdogo Mdogo* 🪙\n\nHujambo {name}.\n\n🏠 Kodi ya mwezi: {rent}\n⚖️ Bado unadaiwa: {balance}\n📅 Kodi inatakiwa: {due}\n⏰ Lipa kufikia: {payby}\n\nLipa kufikia {payby} ili mwenye nyumba apate yote tarehe {due}.',
++  },
++  ASK_AMOUNT: {
++    en: 'How much do you want to put towards your rent now?\n\nType the amount in shillings (at least {min}, at most {max}). Fees are added on top and shown before you pay.\n\nSuggested: {suggested}\n\nSend *0* to go back or *#* for the main menu.',
++    sw: 'Unataka kuweka kiasi gani kwenye kodi yako sasa?\n\nAndika kiasi kwa shilingi (angalau {min}, kisichozidi {max}). Ada huongezwa juu na huonyeshwa kabla ya kulipa.\n\nIlipendekezwa: {suggested}\n\nTuma *0* kurudi nyuma au *#* kwenda menyu kuu.',
++  },
++  BAD_AMOUNT: {
++    en: 'Please type a whole number of shillings between {min} and {max}, for example 500.',
++    sw: 'Tafadhali andika namba kamili ya shilingi kati ya {min} na {max}, kwa mfano 500.',
++  },
++  QUOTE: {
++    en: '*Your payment* 💳\n\n🏠 Goes to your rent: {credit}\n➕ Fees: {fees}\n💰 You pay: {charge}\n\nPay by {payby} so your landlord gets all of it on time.',
++    sw: '*Malipo yako* 💳\n\n🏠 Inaenda kwenye kodi yako: {credit}\n➕ Ada: {fees}\n💰 Unalipa: {charge}\n\nLipa kufikia {payby} ili mwenye nyumba apate yote kwa wakati.',
++  },
++  ASK_PHONE: {
++    en: 'Which M-Pesa number will pay? Tap the button to use your WhatsApp number, or type another one (07… or 01…).',
++    sw: 'Ni namba gani ya M-Pesa italipa? Gusa kitufe kutumia namba yako ya WhatsApp, au andika nyingine (07… au 01…).',
++  },
++  CONFIRM: {
++    en: '*Please confirm* ✅\n\n🏠 Goes to your rent: {credit}\n➕ Fees: {fees}\n💰 You pay: {charge}\n📱 M-Pesa number: {phone}\n\nTap *Confirm* to send the M-Pesa prompt.',
++    sw: '*Tafadhali thibitisha* ✅\n\n🏠 Inaenda kwenye kodi yako: {credit}\n➕ Ada: {fees}\n💰 Unalipa: {charge}\n📱 Namba ya M-Pesa: {phone}\n\nGusa *Thibitisha* kutuma ombi la M-Pesa.',
++  },
++  BAD_PHONE: {
++    en: 'That number is not valid. Type a Kenyan number starting with 07 or 01.',
++    sw: 'Namba hiyo si sahihi. Andika namba ya Kenya inayoanza na 07 au 01.',
++  },
++  BAD_CHOICE: {
++    en: 'Please tap *Confirm* or *Back*.',
++    sw: 'Tafadhali gusa *Thibitisha* au *Nyuma*.',
++  },
++  QUOTE_REFRESHED: {
++    en: 'The price was refreshed. Please check it before you confirm.',
++    sw: 'Bei imesasishwa. Tafadhali iangalie kabla ya kuthibitisha.',
++  },
++  SENT: {
++    en: 'M-Pesa prompt sent to {phone} 📲\n\nEnter your PIN to pay {charge}. We will text you when your rent credit is recorded. Please do not pay twice: tap *Check balance* after a minute.',
++    sw: 'Ombi la M-Pesa limetumwa kwa {phone} 📲\n\nWeka PIN yako ili ulipe {charge}. Tutakutumia ujumbe malipo yakirekodiwa kwenye kodi yako. Tafadhali usilipe mara mbili: gusa *Angalia salio* baada ya dakika moja.',
++  },
++  PAY_UNSURE: {
++    en: 'We could not confirm if the M-Pesa prompt was sent. If you get a prompt, enter your PIN. Please check your balance before trying again, so you do not pay twice.',
++    sw: 'Hatukuweza kuthibitisha kama ombi la M-Pesa limetumwa. Ukipata ombi, weka PIN yako. Tafadhali angalia salio lako kabla ya kujaribu tena, ili usilipe mara mbili.',
++  },
++  PAY_FAILED: {
++    en: 'We could not start the payment. Nothing is taken from your M-Pesa until you enter your PIN. Please try again in a few minutes.',
++    sw: 'Hatukuweza kuanzisha malipo. Hakuna kinachotolewa kwenye M-Pesa yako hadi uweke PIN yako. Tafadhali jaribu tena baada ya dakika chache.',
++  },
++  E_RATE: {
++    en: 'Too many tries. Please wait a few minutes and try again.',
++    sw: 'Majaribio mengi sana. Tafadhali subiri dakika chache kisha ujaribu tena.',
++  },
++  E_AMOUNT: {
++    en: 'That amount cannot be paid right now. Check your balance and try another amount.',
++    sw: 'Kiasi hicho hakiwezi kulipwa sasa. Angalia salio lako kisha ujaribu kiasi kingine.',
++  },
++  E_QUOTE: {
++    en: 'That price has expired. Please choose the amount again to get a fresh one.',
++    sw: 'Bei hiyo imeisha muda. Tafadhali chagua kiasi tena upate mpya.',
++  },
++  E_STATE: {
++    en: 'We cannot take a payment right now. Please check your balance, or contact support on {phone}.',
++    sw: 'Hatuwezi kupokea malipo sasa. Tafadhali angalia salio lako, au wasiliana na msaada kwa {phone}.',
++  },
++  E_DISABLED: {
++    en: '*Lipa Mdogo Mdogo* is not available right now. Please try again later.',
++    sw: '*Lipa Mdogo Mdogo* haipatikani kwa sasa. Tafadhali jaribu tena baadaye.',
++  },
++  TRY_LATER: {
++    en: 'Something went wrong on our side. Please try again in a few minutes.',
++    sw: 'Kuna tatizo upande wetu. Tafadhali jaribu tena baada ya dakika chache.',
++  },
++  JOIN: {
++    en: '*Join Lipa Mdogo Mdogo* 🪙\n\n{text}\n\nCall or WhatsApp Samuhia: {phones}\n\nOr visit a nearby Samuhia desk agent and carry your ID.',
++    sw: '*Jiunge Lipa Mdogo Mdogo* 🪙\n\n{text}\n\nPiga simu au tuma WhatsApp kwa Samuhia: {phones}\n\nAu tembelea wakala wa Samuhia aliye karibu ukiwa na kitambulisho chako.',
++  },
++  JOIN_DEFAULT_TEXT: {
++    en: 'Pay your rent in small amounts, at your own pace. Your landlord does not need to join.',
++    sw: 'Lipa kodi yako kwa awamu ndogo, kwa kasi yako. Mwenye nyumba hahitaji kujiunga.',
++  },
++  CODE_SETUP_OK: {
++    en: '✅ *Lipa Mdogo Mdogo is on!*\n\nYour sign-up is confirmed.{summary}\n\nNext: type *#*, then choose *Lipa Mdogo Mdogo* to pay your rent in small amounts.',
++    sw: '✅ *Lipa Mdogo Mdogo imewashwa!*\n\nKujiunga kwako kumethibitishwa.{summary}\n\nInayofuata: andika *#*, kisha chagua *Lipa Mdogo Mdogo* ulipe kodi yako kwa awamu ndogo.',
++  },
++  CODE_CHANGE_OK: {
++    en: '✅ *Change confirmed.*{summary}\n\nIf you did not ask for this change, contact support on {phone} at once.',
++    sw: '✅ *Mabadiliko yamethibitishwa.*{summary}\n\nUsipoomba mabadiliko haya, wasiliana na msaada kwa {phone} mara moja.',
++  },
++  CODE_CANCELLED: {
++    en: '✅ The change has been cancelled. Your details stay as they were.',
++    sw: '✅ Mabadiliko yamefutwa. Taarifa zako zinabaki kama zilivyokuwa.',
++  },
++  CODE_INVALID: {
++    en: 'That code is not right. Check your SMS and send it again exactly as written (for example *LMM1234*). Too many wrong tries will lock it.',
++    sw: 'Msimbo huo si sahihi. Angalia SMS yako kisha uutume tena kama ulivyoandikwa (kwa mfano *LMM1234*). Makosa mengi yatausimamisha.',
++  },
++  CODE_EXPIRED: {
++    en: 'That code has expired. Ask your Samuhia desk agent to send a new one.',
++    sw: 'Msimbo huo umeisha muda. Mwombe wakala wako wa Samuhia akutumie mpya.',
++  },
++  CODE_LOCKED: {
++    en: 'That code is locked after too many wrong tries. Please wait an hour, or contact support on {phone}.',
++    sw: 'Msimbo huo umesimamishwa baada ya makosa mengi. Tafadhali subiri saa moja, au wasiliana na msaada kwa {phone}.',
++  },
++  CODE_NOT_FOUND: {
++    en: 'We could not match this code to your number. Send it from the same WhatsApp number you gave when you signed up.',
++    sw: 'Hatukuweza kuhusisha msimbo huu na namba yako. Utume kutoka kwa namba ile ile ya WhatsApp uliyotoa ulipojiunga.',
++  },
++  CODE_ERROR: {
++    en: 'We could not check that code right now. Please send it again in a minute.',
++    sw: 'Hatukuweza kuhakiki msimbo huo sasa. Tafadhali utume tena baada ya dakika moja.',
++  },
++} satisfies Record<string, Bi>;
++
++export type LmmxMsgKey = keyof typeof LMMX_MESSAGES;
++
++export function lmxm(key: LmmxMsgKey, lang: Lang, params?: Record<string, string | number>): string {
++  return fill(LMMX_MESSAGES[key][lang], { phone: LMMX_SUPPORT_PHONE, ...params });
++}
+diff --git a/functions/src/constants/messages.ts b/functions/src/constants/messages.ts
+index 0660e29..5e78e9d 100644
+--- a/functions/src/constants/messages.ts
++++ b/functions/src/constants/messages.ts
+@@ -110,15 +110,15 @@ export const MESSAGES = {
+     sw: '*Mpangaji amepatikana* 🎯\n\n👤 Jina: {name}\n💰 Kiasi kinachodaiwa: {outstanding}\n📅 Mwezi wa bili: {billing}\n\nUngependa kuendelea kulipa ankara hii?',
+   },
+ 
+-  // Lipa Mos Mos: pay rent a little at a time
++  // Lipa Mdogo Mdogo: pay rent a little at a time
+   LMM_INTRO: {
+-    en: '*Lipa Mos Mos* 🪙\n\nPay your rent a little at a time. You owe {due}. Your landlord is paid when it is fully covered, or on {settles}. A small fee (2.5%, or 5% on payments under KES 100) is added to each payment.\n\nHow often would you like to pay?',
+-    sw: '*Lipa Mos Mos* 🪙\n\nLipa kodi yako kidogo kidogo. Unadaiwa {due}. Mwenye nyumba analipwa kodi ikikamilika, au tarehe {settles}. Ada ndogo (2.5%, au 5% kwa malipo chini ya KES 100) huongezwa kwa kila malipo.\n\nUngependa kulipa mara ngapi?',
++    en: '*Lipa Mdogo Mdogo* 🪙\n\nPay your rent a little at a time. You owe {due}. Your landlord is paid when it is fully covered, or on {settles}. A small fee (2.5%, or 5% on payments under KES 100) is added to each payment.\n\nHow often would you like to pay?',
++    sw: '*Lipa Mdogo Mdogo* 🪙\n\nLipa kodi yako kidogo kidogo. Unadaiwa {due}. Mwenye nyumba analipwa kodi ikikamilika, au tarehe {settles}. Ada ndogo (2.5%, au 5% kwa malipo chini ya KES 100) huongezwa kwa kila malipo.\n\nUngependa kulipa mara ngapi?',
+   },
+ 
+   LMM_STATUS: {
+-    en: '*Lipa Mos Mos* 🪙\n\n💰 Paid: {paid} of {due}\n📊 Progress: {pct}%\n⚖️ Balance: {balance}\n📅 Landlord is paid by: {settles}\n🔁 Plan: {freq}',
+-    sw: '*Lipa Mos Mos* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
++    en: '*Lipa Mdogo Mdogo* 🪙\n\n💰 Paid: {paid} of {due}\n📊 Progress: {pct}%\n⚖️ Balance: {balance}\n📅 Landlord is paid by: {settles}\n🔁 Plan: {freq}',
++    sw: '*Lipa Mdogo Mdogo* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
+   },
+ 
+   // Shown under the status while the plan holds under KES 300: what a payout will cost, or that it is too small to send. Amounts come from PAY.
+@@ -153,8 +153,8 @@ export const MESSAGES = {
+   },
+ 
+   LMM_UNAVAILABLE: {
+-    en: '*Lipa Mos Mos* is not available right now.\n\n{reason}',
+-    sw: '*Lipa Mos Mos* haipatikani kwa sasa.\n\n{reason}',
++    en: '*Lipa Mdogo Mdogo* is not available right now.\n\n{reason}',
++    sw: '*Lipa Mdogo Mdogo* haipatikani kwa sasa.\n\n{reason}',
+   },
+ 
+   LMM_ERROR: {
+diff --git a/functions/src/constants/states.ts b/functions/src/constants/states.ts
+index 8105834..0def614 100644
+--- a/functions/src/constants/states.ts
++++ b/functions/src/constants/states.ts
+@@ -19,13 +19,23 @@ export enum STATE {
+   PAY_RENT_PROCESSING = 'PAY_RENT_PROCESSING',
+   PAY_RENT_CONFIRM_AMOUNT = 'PAY_RENT_CONFIRM_AMOUNT',
+ 
+-  // Lipa Mos Mos (pay rent a little at a time)
++  // Lipa Mdogo Mdogo (pay rent a little at a time)
+   LMM_MENU = 'LMM_MENU',
+   LMM_FREQ = 'LMM_FREQ',
+   LMM_AMOUNT = 'LMM_AMOUNT',
+   LMM_PHONE = 'LMM_PHONE',
+   LMM_CONFIRM = 'LMM_CONFIRM',
+ 
++  // Lipa Mdogo Mdogo for standalone tenants (LMMX): the bot asks PAY, signed per the LMMX contract
++  LMMX_ID = 'LMMX_ID',
++  LMMX_NOTFOUND = 'LMMX_NOTFOUND',
++  LMMX_HOME = 'LMMX_HOME',
++  LMMX_AMOUNT = 'LMMX_AMOUNT',
++  LMMX_PHONE = 'LMMX_PHONE',
++  LMMX_CONFIRM = 'LMMX_CONFIRM',
++  LMMX_DONE = 'LMMX_DONE',
++  LMMX_JOIN = 'LMMX_JOIN',
++
+   // Get Invoice flow
+   GET_INVOICE_WAITING_ID = 'GET_INVOICE_WAITING_ID',
+ 
+diff --git a/functions/src/constants/ui.messages.ts b/functions/src/constants/ui.messages.ts
+index d8ab76b..0bef4db 100644
+--- a/functions/src/constants/ui.messages.ts
++++ b/functions/src/constants/ui.messages.ts
+@@ -28,7 +28,7 @@ export const UI_LABELS = {
+   SEARCH_AGAIN: { en: 'Search again', sw: 'Tafuta tena' },
+   CONFIRM: { en: 'Confirm', sw: 'Thibitisha' },
+   PAY_NOW: { en: 'Pay now', sw: 'Lipa sasa' },
+-  LMM: { en: 'Lipa Mos Mos', sw: 'Lipa Mos Mos' },
++  LMM: { en: 'Lipa Mdogo Mdogo', sw: 'Lipa Mdogo Mdogo' },
+   DAILY: { en: 'Daily', sw: 'Kila siku' },
+   WEEKLY: { en: 'Weekly', sw: 'Kila wiki' },
+   BIWEEKLY: { en: 'Every 2 weeks', sw: 'Kila wiki 2' },
+@@ -52,16 +52,26 @@ export function ulabel(key: UiLabelKey, lang: Lang, params?: Record<string, stri
+ }
+ 
+ /**
+- * Main-menu rows. `value` is the option number the main-menu handler has always understood, so typing 7 still opens
++ * Main-menu rows (10 = the WhatsApp list limit, so there is no room for another). `value` is the option number the main-menu handler has always understood, so typing 7 still opens
+  * Landlord Watch. The ORDER here is the display order (Exit last), not numeric.
+  */
+ export const MAIN_MENU_ROWS = [
+-  { value: '1', title: { en: 'Pay Rent', sw: 'Lipa Kodi' }, desc: { en: 'Pay your rent with M-Pesa', sw: 'Lipa kodi yako kwa M-Pesa' } },
++  { value: '1', title: { en: 'Pay Rent', sw: 'Lipa Kodi' }, desc: { en: 'Pay your rent invoice now with M-Pesa', sw: 'Lipa ankara ya kodi sasa kwa M-Pesa' } },
+   {
+     value: '2',
+     title: { en: 'Get Rent Invoice', sw: 'Pata Ankara ya Kodi' },
+     desc: { en: 'View your invoice and its PDF link', sw: 'Ona ankara yako na kiungo cha PDF' },
+   },
++  {
++    value: '9',
++    title: { en: 'Lipa Mdogo Mdogo', sw: 'Lipa Mdogo Mdogo' },
++    desc: { en: 'Pay rent in small amounts, at your own pace', sw: 'Lipa kodi kwa awamu ndogo, kwa kasi yako' },
++  },
++  {
++    value: '10',
++    title: { en: 'Join Lipa Mdogo Mdogo', sw: 'Jiunge Lipa Mdogo Mdogo' },
++    desc: { en: 'Not signed up yet? See how to join', sw: 'Bado hujajiunga? Tazama jinsi ya kujiunga' },
++  },
+   {
+     value: '3',
+     title: { en: 'My Chama', sw: 'My Chama' },
+diff --git a/functions/src/handlers/lmm.handler.ts b/functions/src/handlers/lmm.handler.ts
+index a517fe0..9f099d2 100644
+--- a/functions/src/handlers/lmm.handler.ts
++++ b/functions/src/handlers/lmm.handler.ts
+@@ -1,5 +1,5 @@
+ /**
+- * Lipa Mos Mos on WhatsApp: pay rent a little at a time. Reached from the tenant-found screen of Pay Rent.
++ * Lipa Mdogo Mdogo on WhatsApp: pay rent a little at a time. Reached from the tenant-found screen of Pay Rent.
+  * All money logic (the 2.5% / 5% fee, the plan, settling the landlord) lives in PAY; this file only asks PAY and shows the answers.
+  * The bot never sends a destination or a credited amount it decided itself: PAY recomputes and verifies everything.
+  */
+@@ -94,7 +94,7 @@ const summary = (lang: Lang, credit: number, phone: string): Outbound => {
+   return uiButtons(getMessage('LMM_SUMMARY', lang, { credit: kesWhole(credit), pct: c.pct, fee: kesWhole(c.fee), total: kesWhole(c.total), phone }), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
+ };
+ 
+-/** Typed navigation inside Lipa Mos Mos: 0 goes back one step, 00 restarts Pay Rent, 000 leaves, # is the main menu (a button). */
++/** Typed navigation inside Lipa Mdogo Mdogo: 0 goes back one step, 00 restarts Pay Rent, 000 leaves, # is the main menu (a button). */
+ async function navigate(phone: string, input: string, session: Session): Promise<Reply | null> {
+   const lang = session.language;
+   const nav = checkNavigationCommand(input);
+@@ -114,7 +114,7 @@ async function navigate(phone: string, input: string, session: Session): Promise
+ }
+ 
+ const fail = async (phone: string, session: Session, err: unknown): Promise<Reply> => {
+-  logger.error('Lipa Mos Mos error', err);
++  logger.error('Lipa Mdogo Mdogo error', err);
+   const reason = err instanceof Error ? err.message : 'please try again';
+   await updateSessionState(phone, STATE.LMM_MENU, {});
+   return withNotice(uiButtons(getMessage('LMM_ERROR', session.language, { reason }), [btn('RETRY', ulabel('LMM', session.language)), mainButton(session.language)]), '');
+diff --git a/functions/src/handlers/lmmx.handler.ts b/functions/src/handlers/lmmx.handler.ts
+new file mode 100644
+index 0000000..764a9d3
+--- /dev/null
++++ b/functions/src/handlers/lmmx.handler.ts
+@@ -0,0 +1,401 @@
++/**
++ * Lipa Mdogo Mdogo on WhatsApp for STANDALONE tenants (registered by a Samuhia desk, landlord not on Plot Yangu).
++ *
++ *   menu 9  -> ask the ID number -> `lmmx_bot_lookup` with the sender's number
++ *                standalone -> status, amount, quote (rent / fees / you pay), M-Pesa number, confirm, STK
++ *                legacy     -> the EXISTING Lipa Mdogo Mdogo flow of lmm.handler.ts, unchanged (landlord on Plot Yangu)
++ *                none       -> "we could not find you" (also what a phone/ID mismatch looks like: no enumeration)
++ *   menu 10 -> `lmmx_bot_joinInfo`, then how to join
++ *   LMM#### / LMC#### -> answered from ANY state by `lmmxCodeReply` (called by the webhook before the state dispatch)
++ *
++ * All money, identity and fee decisions are PAY's. The bot shows the numbers a quote returns and never computes its own.
++ * `0` goes back, `#` is the main menu, `00` restarts, `000` leaves (as in the other handlers).
++ */
++import { Session } from '../types/session.types';
++import { clearSessionContext, updateSessionContext, updateSessionState } from '../services/session.service';
++import { checkNavigationCommand, validatePhoneNumber } from '../utils/validator';
++import { ulabel } from '../constants/ui.messages';
++import { LMMX_SUPPORT_PHONE, LmmxMsgKey, lmxl, lmxm } from '../constants/lmmx.messages';
++import { STATE } from '../constants/states';
++import { logger } from '../utils/logger';
++import { Outbound } from '../types/watch.types';
++import { btn, mainButton, mainMenuReply, Reply, uiButtons, uiText, welcomeReply, withNotice } from '../utils/ui';
++import * as lmmx from '../services/lmmx.client';
++import { LmmxBotError } from '../services/lmmx.client';
++import { LMMX, kes, normalizeKePhone, shortDate, validIdNumber } from '../types/lmmx.contract';
++import type { BotConfirmCodeOut, BotLookupOut, BotQuoteOut } from '../types/lmmx.contract';
++import { findTenantAndInvoice } from './rent.handler';
++import { startLmm } from './lmm.handler';
++
++type Lang = Session['language'];
++
++const MIN_KES = LMMX.MIN_CREDIT_MINOR / 100;
++const MAX_KES = LMMX.MAX_CREDIT_MINOR / 100;
++const kesWhole = (n: number): string => `KES ${n.toLocaleString('en-KE')}`;
++const back = (lang: Lang) => btn('0', ulabel('BACK', lang));
++const isId = (v: string): boolean => validIdNumber('national_id', v) || validIdNumber('alien_id', v) || validIdNumber('passport', v);
++/** "+254712345678" -> "0712345678", for buttons and summaries a Kenyan user reads easily. */
++const localPhone = (e164: string): string => (e164.startsWith('+254') ? `0${e164.slice(4)}` : e164);
++const ctxId = (s: Session): string => String(s.context?.lmxId ?? '');
++
++interface SavedQuote { quoteId: string; expiresAt: number; creditMinor: number; feesMinor: number; chargeMinor: number; payByDate: string }
++function savedQuote(s: Session): SavedQuote | null {
++  try {
++    const q = s.context?.lmxQuote ? (JSON.parse(String(s.context.lmxQuote)) as SavedQuote) : null;
++    return q && q.quoteId && Number.isInteger(q.creditMinor) ? q : null;
++  } catch {
++    return null;
++  }
++}
++const toSaved = (q: BotQuoteOut): SavedQuote => ({ quoteId: q.quoteId, expiresAt: q.expiresAt, creditMinor: q.creditMinor, feesMinor: q.feesMinor, chargeMinor: q.chargeMinor, payByDate: q.payByDate });
++
++// ── Screens ──────────────────────────────────────────────────────────────
++
++const askIdScreen = (lang: Lang): Outbound => uiButtons(lmxm('ASK_ID', lang), [mainButton(lang)]);
++
++const notFoundScreen = (lang: Lang): Outbound =>
++  uiButtons(lmxm('NOT_FOUND', lang), [btn('RETRY', lmxl('TRY_AGAIN', lang)), btn('JOIN', lmxl('JOIN', lang)), mainButton(lang)]);
++
++const homeScreen = (lang: Lang, s: NonNullable<BotLookupOut['standalone']>): Outbound =>
++  uiButtons(
++    lmxm('HOME', lang, {
++      name: s.firstName,
++      rent: kes(s.rentMinor),
++      balance: s.remainingMinor > 0 ? kes(s.remainingMinor) : 'KES 0 ✅',
++      due: shortDate(s.dueDate),
++      payby: shortDate(s.payByDate),
++    }),
++    [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('0', ulabel('BACK', lang)), mainButton(lang)]
++  );
++
++const amountScreen = (lang: Lang, suggestedMinor: number): Outbound =>
++  uiButtons(
++    lmxm('ASK_AMOUNT', lang, { min: kesWhole(MIN_KES), max: kesWhole(MAX_KES), suggested: kes(suggestedMinor) }),
++    suggestedMinor >= LMMX.MIN_CREDIT_MINOR
++      ? [btn('SUG', lmxl('PAY_AMOUNT', lang, { amount: kes(suggestedMinor) })), back(lang), mainButton(lang)]
++      : [back(lang), mainButton(lang)]
++  );
++
++const quoteLines = (lang: Lang, q: SavedQuote, key: 'QUOTE' | 'CONFIRM', phone?: string): string =>
++  lmxm(key, lang, { credit: kes(q.creditMinor), fees: kes(q.feesMinor), charge: kes(q.chargeMinor), payby: shortDate(q.payByDate), phone: phone ? localPhone(phone) : '' });
++
++const phoneScreen = (lang: Lang, q: SavedQuote, sender: string | null): Outbound => {
++  const text = `${quoteLines(lang, q, 'QUOTE')}\n\n${lmxm('ASK_PHONE', lang)}`;
++  const own = sender ? [btn('ME', ulabel('USE_NUMBER', lang, { phone: localPhone(sender) }))] : [];
++  return uiButtons(text, [...own, back(lang), mainButton(lang)]);
++};
++
++const confirmScreen = (lang: Lang, q: SavedQuote, payer: string): Outbound =>
++  uiButtons(quoteLines(lang, q, 'CONFIRM', payer), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
++
++const afterPayButtons = (lang: Lang) => [btn('CHECK', lmxl('CHECK', lang)), btn('PAYNOW', lmxl('PAY_MORE', lang)), mainButton(lang)];
++
++// ── Errors ───────────────────────────────────────────────────────────────
++
++function errorKey(err: unknown): LmmxMsgKey {
++  switch (err instanceof LmmxBotError ? err.code : undefined) {
++    case 'LMMX_E_RATE': return 'E_RATE';
++    case 'LMMX_E_AMOUNT': return 'E_AMOUNT';
++    case 'LMMX_E_QUOTE': return 'E_QUOTE';
++    case 'LMMX_E_STATE': return 'E_STATE';
++    case 'LMMX_E_DISABLED': return 'E_DISABLED';
++    case 'LMMX_E_FROZEN': return 'FROZEN';
++    default: return 'TRY_LATER';
++  }
++}
++const logFail = (where: string, err: unknown): void =>
++  // Never the payload: it carries an ID number and phones.
++  logger.error('Lipa Mdogo Mdogo (standalone) call failed', { where, code: err instanceof LmmxBotError ? err.code : undefined, timeout: err instanceof LmmxBotError ? err.timeout : undefined });
++
++/** A failed lookup: say what went wrong and let the user try again or leave. */
++async function lookupFailed(phone: string, session: Session, err: unknown): Promise<Reply> {
++  logFail('lookup', err);
++  await updateSessionState(phone, STATE.LMMX_NOTFOUND, {});
++  return uiButtons(lmxm(errorKey(err), session.language), [btn('RETRY', lmxl('TRY_AGAIN', session.language)), mainButton(session.language)]);
++}
++
++// ── Entry points ─────────────────────────────────────────────────────────
++
++/** Main menu option 9. */
++export async function beginLmmx(phone: string, session: Session): Promise<Reply> {
++  await clearSessionContext(phone);
++  await updateSessionState(phone, STATE.LMMX_ID, {});
++  return askIdScreen(session.language);
++}
++
++/** Main menu option 10, and the Join button of the not-found screen. */
++export async function beginLmmxJoin(phone: string, session: Session): Promise<Reply> {
++  const lang = session.language;
++  let text = lmxm('JOIN_DEFAULT_TEXT', lang);
++  let phones = LMMX_SUPPORT_PHONE;
++  try {
++    const info = await lmmx.joinInfo();
++    if (info.text?.trim()) text = info.text.trim().slice(0, 400);
++    if (info.supportPhones?.length) phones = info.supportPhones.slice(0, 3).join(', ');
++  } catch (err) {
++    logFail('joinInfo', err); // the static text above still tells them how to join
++  }
++  await clearSessionContext(phone);
++  await updateSessionState(phone, STATE.LMMX_JOIN, {});
++  return uiButtons(lmxm('JOIN', lang, { text, phones }), [mainButton(lang)]);
++}
++
++/** Decide what a lookup answer means and show the right screen. */
++async function afterLookup(phone: string, session: Session, id: string, out: BotLookupOut): Promise<Reply> {
++  const lang = session.language;
++  if (out.kind === 'legacy') return startLegacy(phone, session, id);
++  const s = out.kind === 'standalone' ? out.standalone : undefined;
++  if (!s) {
++    await clearSessionContext(phone);
++    await updateSessionState(phone, STATE.LMMX_NOTFOUND, {});
++    return notFoundScreen(lang);
++  }
++  if (s.frozen) {
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm('FROZEN', lang), [mainButton(lang)]);
++  }
++  if (s.awaitingSetup) {
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm('AWAITING', lang), [mainButton(lang)]);
++  }
++  await updateSessionContext(phone, { lmxId: id, lmxSug: s.suggestedCreditMinor });
++  await updateSessionState(phone, STATE.LMMX_HOME, {});
++  return homeScreen(lang, s);
++}
++
++/** The landlord is on Plot Yangu: hand over to the existing flow, giving it the context it expects (as Pay Rent saves it). */
++async function startLegacy(phone: string, session: Session, id: string): Promise<Reply> {
++  const lang = session.language;
++  const { tenant, invoice, assetId } = await findTenantAndInvoice(id);
++  if (!tenant || !invoice || !assetId) {
++    await clearSessionContext(phone);
++    await updateSessionState(phone, STATE.LMMX_NOTFOUND, {});
++    return notFoundScreen(lang);
++  }
++  await clearSessionContext(phone);
++  const context = { tenantId: id, foundTenant: JSON.stringify(tenant), foundInvoice: JSON.stringify(invoice), assetId };
++  await updateSessionContext(phone, context);
++  return startLmm(phone, { ...session, context });
++}
++
++/** Look the tenant up again with the ID we already hold (after Back, Check balance, or an expired screen). */
++async function refreshHome(phone: string, session: Session): Promise<Reply> {
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++  try {
++    return await afterLookup(phone, session, id, await lmmx.lookup(sender, id));
++  } catch (err) {
++    return lookupFailed(phone, session, err);
++  }
++}
++
++// ── Navigation ───────────────────────────────────────────────────────────
++
++async function navigate(phone: string, input: string, session: Session): Promise<Reply | null> {
++  const lang = session.language;
++  const nav = checkNavigationCommand(input);
++  if (nav.type === 'exit') {
++    await clearSessionContext(phone);
++    await updateSessionState(phone, STATE.LANGUAGE_SELECTION, {});
++    return welcomeReply();
++  }
++  if (nav.type === 'restart') {
++    await clearSessionContext(phone);
++    await updateSessionState(phone, STATE.MAIN_MENU, {});
++    return mainMenuReply(lang);
++  }
++  if (nav.type !== 'back') return null;
++  switch (session.currentState) {
++    case STATE.LMMX_HOME:
++    case STATE.LMMX_NOTFOUND:
++      return beginLmmx(phone, session);
++    case STATE.LMMX_AMOUNT:
++    case STATE.LMMX_DONE:
++      return refreshHome(phone, session);
++    case STATE.LMMX_PHONE:
++      await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
++      return amountScreen(lang, Number(session.context?.lmxSug ?? 0));
++    case STATE.LMMX_CONFIRM: {
++      const q = savedQuote(session);
++      if (!q) break;
++      await updateSessionState(phone, STATE.LMMX_PHONE, {});
++      return phoneScreen(lang, q, normalizeKePhone(phone));
++    }
++    default:
++      break; // LMMX_ID, LMMX_JOIN: out to the main menu
++  }
++  await clearSessionContext(phone);
++  await updateSessionState(phone, STATE.MAIN_MENU, {});
++  return mainMenuReply(lang);
++}
++
++// ── State handlers ───────────────────────────────────────────────────────
++
++export async function handleLmmxId(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const id = input.trim();
++  if (!isId(id)) return withNotice(askIdScreen(lang), lmxm('BAD_ID', lang));
++  const sender = normalizeKePhone(phone);
++  try {
++    // A sender we cannot normalise can never match a tenant: same answer as "not found", without calling PAY.
++    return await afterLookup(phone, session, id, sender ? await lmmx.lookup(sender, id) : { kind: 'none' });
++  } catch (err) {
++    return lookupFailed(phone, session, err);
++  }
++}
++
++export async function handleLmmxNotFound(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const v = input.trim().toUpperCase();
++  if (v === 'JOIN') return beginLmmxJoin(phone, session);
++  return beginLmmx(phone, session); // RETRY, or anything else: ask for the ID again
++}
++
++export async function handleLmmxJoin(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  await clearSessionContext(phone);
++  await updateSessionState(phone, STATE.MAIN_MENU, {});
++  return mainMenuReply(session.language);
++}
++
++export async function handleLmmxHome(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  if (input.trim().toUpperCase() === 'PAYNOW') {
++    await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
++    return amountScreen(session.language, Number(session.context?.lmxSug ?? 0));
++  }
++  return refreshHome(phone, session);
++}
++
++/** After a payment attempt, or a frozen / awaiting-setup answer: Check balance, Pay more, or leave. */
++export async function handleLmmxDone(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  if (input.trim().toUpperCase() === 'PAYNOW' && ctxId(session)) {
++    await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
++    return amountScreen(session.language, Number(session.context?.lmxSug ?? 0));
++  }
++  return refreshHome(phone, session);
++}
++
++export async function handleLmmxAmount(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const suggested = Number(session.context?.lmxSug ?? 0);
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++
++  const raw = input.trim().toUpperCase() === 'SUG' ? String(suggested / 100) : input.replace(/[,\s]/g, '').replace(/^KES/i, '');
++  const n = Number(raw);
++  if (!/^\d+(\.0+)?$/.test(raw) || !Number.isInteger(n) || n < MIN_KES || n > MAX_KES) {
++    return withNotice(amountScreen(lang, suggested), lmxm('BAD_AMOUNT', lang, { min: kesWhole(MIN_KES), max: kesWhole(MAX_KES) }));
++  }
++  try {
++    const q = await lmmx.quote(sender, id, n * 100);
++    await updateSessionContext(phone, { lmxQuote: JSON.stringify(toSaved(q)) });
++    await updateSessionState(phone, STATE.LMMX_PHONE, {});
++    return phoneScreen(lang, toSaved(q), sender);
++  } catch (err) {
++    logFail('quote', err);
++    return withNotice(amountScreen(lang, suggested), lmxm(errorKey(err), lang));
++  }
++}
++
++export async function handleLmmxPhone(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const q = savedQuote(session);
++  const sender = normalizeKePhone(phone);
++  if (!q || !sender) {
++    await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
++    return amountScreen(lang, Number(session.context?.lmxSug ?? 0));
++  }
++  let payer: string | null = null;
++  if (input.trim().toUpperCase() === 'ME') payer = sender;
++  else {
++    const v = validatePhoneNumber(input);
++    payer = v.valid ? normalizeKePhone(input) : null;
++  }
++  if (!payer) return withNotice(phoneScreen(lang, q, sender), lmxm('BAD_PHONE', lang));
++  await updateSessionContext(phone, { lmxPayer: payer });
++  await updateSessionState(phone, STATE.LMMX_CONFIRM, {});
++  return confirmScreen(lang, q, payer);
++}
++
++export async function handleLmmxConfirm(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  const q = savedQuote(session);
++  const payer = String(session.context?.lmxPayer ?? '');
++  if (!id || !sender || !q || !payer) {
++    await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
++    return amountScreen(lang, Number(session.context?.lmxSug ?? 0));
++  }
++  if (!['YES', 'NDIO', 'CONFIRM', 'THIBITISHA'].includes(input.trim().toUpperCase())) {
++    return withNotice(confirmScreen(lang, q, payer), lmxm('BAD_CHOICE', lang));
++  }
++  try {
++    let use = q;
++    if (q.expiresAt <= Date.now()) {
++      // The 10-minute quote has lapsed: get a fresh one and make the user look at the new numbers before anything is charged.
++      use = toSaved(await lmmx.quote(sender, id, q.creditMinor));
++      await updateSessionContext(phone, { lmxQuote: JSON.stringify(use) });
++      return withNotice(confirmScreen(lang, use, payer), lmxm('QUOTE_REFRESHED', lang));
++    }
++    await lmmx.pay(sender, id, use.quoteId, payer);
++    await updateSessionContext(phone, { lmxQuote: '', lmxPayer: '' });
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm('SENT', lang, { phone: localPhone(payer), charge: kes(use.chargeMinor) }), afterPayButtons(lang));
++  } catch (err) {
++    logFail('pay', err);
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    const unsure = err instanceof LmmxBotError && err.timeout;
++    const text = unsure ? lmxm('PAY_UNSURE', lang) : err instanceof LmmxBotError && err.code ? lmxm(errorKey(err), lang) : lmxm('PAY_FAILED', lang);
++    // After a failure the quote is spent or unusable: "Pay more" starts again from the amount.
++    return uiButtons(text, afterPayButtons(lang));
++  }
++}
++
++// ── Codes (LMM#### / LMC####) from any state ─────────────────────────────
++
++const summaryOf = (r: BotConfirmCodeOut): string => {
++  const s = (r.summary ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
++  return s ? ` ${s}` : '';
++};
++
++/**
++ * The reply to a message that is only an LMMX code. The webhook calls this BEFORE the state dispatch and never touches
++ * the session, so a tenant can send the code from the language screen, the main menu or the middle of another flow.
++ * PAY checks that the sender's number is the tenant's phone on file; the text goes to PAY as typed.
++ */
++export async function lmmxCodeReply(phone: string, text: string, lang: Lang): Promise<Reply> {
++  const sender = normalizeKePhone(phone);
++  if (!sender) return uiText(lmxm('CODE_NOT_FOUND', lang));
++  try {
++    const r = await lmmx.confirmCode(sender, text);
++    switch (r.result) {
++      case 'setup_confirmed': return uiText(lmxm('CODE_SETUP_OK', lang, { summary: summaryOf(r) }));
++      case 'change_confirmed': return uiText(lmxm('CODE_CHANGE_OK', lang, { summary: summaryOf(r) }));
++      case 'change_cancelled': return uiText(lmxm('CODE_CANCELLED', lang));
++      case 'expired': return uiText(lmxm('CODE_EXPIRED', lang));
++      case 'locked': return uiText(lmxm('CODE_LOCKED', lang));
++      case 'not_found': return uiText(lmxm('CODE_NOT_FOUND', lang));
++      default: return uiText(lmxm('CODE_INVALID', lang));
++    }
++  } catch (err) {
++    logFail('confirmCode', err);
++    return uiText(lmxm(err instanceof LmmxBotError && err.code === 'LMMX_E_RATE' ? 'E_RATE' : 'CODE_ERROR', lang));
++  }
++}
+diff --git a/functions/src/handlers/menu.handler.ts b/functions/src/handlers/menu.handler.ts
+index 90f4940..451bbaa 100644
+--- a/functions/src/handlers/menu.handler.ts
++++ b/functions/src/handlers/menu.handler.ts
+@@ -13,13 +13,14 @@ import { beginMyChama } from './mychama.handler';
+ import { beginWatch } from './watch.entry';
+ import { beginHouseToRent } from './house.handler';
+ import { promptNationalId } from './rent.handler';
++import { beginLmmx, beginLmmxJoin } from './lmmx.handler';
+ import { isWatchKeyword } from '../utils/watch.format';
+ import { helpReply, mainMenuReply, plotReply, Reply } from '../utils/ui';
+ 
+ /**
+  * Handle main menu selection
+  * Option values are the numbers the menu has always used: 1 Pay Rent, 2 Invoice, 3 My Chama, 4 Plot, 5 Exit, 6 Help,
+- * 7 Landlord Watch, 8 House to Rent (the list shows them in a friendlier order).
++ * 7 Landlord Watch, 8 House to Rent, 9 Lipa Mdogo Mdogo, 10 Join Lipa Mdogo Mdogo (the list shows them in a friendlier order).
+  */
+ export async function handleMainMenu(phone: string, input: string, session: Session): Promise<Reply> {
+   try {
+@@ -29,8 +30,8 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
+       return await beginWatch(phone, session);
+     }
+ 
+-    // Validate input (1-8)
+-    const validation = validateMenuSelection(input, 1, 8);
++    // Validate input (1-10)
++    const validation = validateMenuSelection(input, 1, 10);
+ 
+     if (!validation.valid || validation.option === undefined) {
+       return mainMenuReply(session.language);
+@@ -75,6 +76,14 @@ export async function handleMainMenu(phone: string, input: string, session: Sess
+         logger.info('Navigating to House to Rent');
+         return await beginHouseToRent(phone, session);
+ 
++      case 9: // Lipa Mdogo Mdogo (pay rent in small amounts)
++        logger.info('Navigating to Lipa Mdogo Mdogo');
++        return await beginLmmx(phone, session);
++
++      case 10: // Join Lipa Mdogo Mdogo
++        logger.info('Navigating to Join Lipa Mdogo Mdogo');
++        return await beginLmmxJoin(phone, session);
++
+       default:
+         return mainMenuReply(session.language);
+     }
+diff --git a/functions/src/handlers/rent.handler.ts b/functions/src/handlers/rent.handler.ts
+index 5d4d3cb..6120970 100644
+--- a/functions/src/handlers/rent.handler.ts
++++ b/functions/src/handlers/rent.handler.ts
+@@ -16,7 +16,6 @@ import { logger } from '../utils/logger';
+ import { db } from '../config/firebase.config';
+ import { initiatePayment, hasPaymentInfo, getAssetContactInfo } from '../services/payment.service';
+ import { btn, mainButton, mainMenuReply, Reply, row, uiButtons, uiList, uiText, welcomeReply, withNotice } from '../utils/ui';
+-import { startLmm } from './lmm.handler';
+ import { Outbound } from '../types/watch.types';
+ 
+ interface TenantData {
+@@ -78,7 +77,7 @@ function promptTenantId(lang: Lang): Outbound {
+ }
+ 
+ function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outbound {
+-  // A list, not buttons: WhatsApp shows at most 3 buttons, and there are now 4 choices (the row ids are the same values as before).
++  // A list so the choices read clearly (Lipa Mdogo Mdogo now has its own main-menu entry, so it is no longer offered here).
+   return uiList(
+     getMessage('TENANT_FOUND', lang, {
+       name: tenant.name,
+@@ -88,14 +87,13 @@ function tenantFound(lang: Lang, tenant: TenantData, invoice: InvoiceData): Outb
+     ulabel('LIST_BUTTON', lang),
+     [
+       row('CONTINUE', ulabel('PAY_ALL_AT_ONCE', lang)),
+-      row('LMM', ulabel('LMM', lang)),
+       row('EDIT', ulabel('SEARCH_AGAIN', lang)),
+       row('#', ulabel('MAIN', lang)),
+     ]
+   );
+ }
+ 
+-/** The tenant-found screen rebuilt from the saved session (used by Lipa Mos Mos to go back). */
++/** The tenant-found screen rebuilt from the saved session (used by Lipa Mdogo Mdogo to go back). */
+ export function tenantFoundScreen(session: Session): Outbound | null {
+   const { tenant, invoice } = readSaved(session);
+   return tenant && invoice ? tenantFound(session.language, tenant, invoice) : null;
+@@ -225,6 +223,68 @@ async function handleNavigation(phone: string, input: string, session: Session):
+  * Pay Rent
+  * ================================================================== */
+ 
++/**
++ * Look a tenant up by ID across the landlords' PMS data and find their unpaid invoice. Shared by Pay Rent and by the
++ * Lipa Mdogo Mdogo entry (for a tenant whose landlord uses Plot Yangu), so both see exactly the same tenant.
++ */
++export async function findTenantAndInvoice(tenantId: string): Promise<{ tenant: TenantData | null; invoice: InvoiceData | null; assetId: string | null }> {
++  // Search for tenant and invoice in Firestore
++  const usersRef = db.collection('users');
++  const allUsers = await usersRef.get();
++
++  let foundTenant: TenantData | null = null;
++  let foundInvoice: InvoiceData | null = null;
++  let assetId: string | null = null;
++
++  // Search through all users for the tenant
++  for (const userDoc of allUsers.docs) {
++    const tenantIdNum = parseInt(tenantId);
++    const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
++
++    try {
++      const tenantsRef = userDoc.ref.collection('tenants');
++      const tenantSnapshot = await tenantsRef.where('localId', 'in', searchIds).get();
++
++      if (!tenantSnapshot.empty) {
++        const tenantDoc = tenantSnapshot.docs[0];
++        foundTenant = {
++          id: tenantDoc.id,
++          ...(tenantDoc.data() as any),
++        };
++        assetId = userDoc.id;
++
++        logger.info('Tenant found', { tenantId, assetId });
++        break;
++      }
++    } catch (err) {
++      // Continue searching other users
++      continue;
++    }
++  }
++
++  if (!foundTenant) return { tenant: null, invoice: null, assetId: null };
++
++  // Find unpaid invoice or last paid invoice
++  if (assetId) {
++    const invoicesRef = db.collection('users').doc(assetId).collection('invoices');
++    const tenantIdNum = parseInt(tenantId);
++    const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
++
++    // Search for unpaid invoices first
++    const unpaidSnapshot = await invoicesRef.where('tenantId', 'in', searchIds).where('isPaid', '==', false).get();
++
++    if (!unpaidSnapshot.empty) {
++      const invoiceDoc = unpaidSnapshot.docs[0];
++      foundInvoice = {
++        id: invoiceDoc.id,
++        ...(invoiceDoc.data() as any),
++      };
++    }
++  }
++
++  return { tenant: foundTenant, invoice: foundInvoice, assetId };
++}
++
+ /**
+  * Handle tenant ID for pay rent
+  */
+@@ -246,66 +306,13 @@ export async function handlePayRentId(phone: string, input: string, session: Ses
+     // Perform the search immediately (don't wait for next message)
+     logger.info('Tenant ID collected, searching for tenant and invoice', { tenantId });
+ 
+-    // Search for tenant and invoice in Firestore
+-    const usersRef = db.collection('users');
+-    const allUsers = await usersRef.get();
+-
+-    let foundTenant: TenantData | null = null;
+-    let foundInvoice: InvoiceData | null = null;
+-    let assetId: string | null = null;
+-
+-    // Search through all users for the tenant
+-    for (const userDoc of allUsers.docs) {
+-      const tenantIdNum = parseInt(tenantId);
+-      const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
+-
+-      try {
+-        const tenantsRef = userDoc.ref.collection('tenants');
+-        const tenantSnapshot = await tenantsRef.where('localId', 'in', searchIds).get();
+-
+-        if (!tenantSnapshot.empty) {
+-          const tenantDoc = tenantSnapshot.docs[0];
+-          foundTenant = {
+-            id: tenantDoc.id,
+-            ...(tenantDoc.data() as any),
+-          };
+-          assetId = userDoc.id;
+-
+-          logger.info('Tenant found', { tenantId, assetId });
+-          break;
+-        }
+-      } catch (err) {
+-        // Continue searching other users
+-        continue;
+-      }
+-    }
++    const { tenant: foundTenant, invoice: foundInvoice, assetId } = await findTenantAndInvoice(tenantId);
+ 
+     if (!foundTenant) {
+       logger.warn('Tenant not found', { tenantId });
+       return withNotice(promptTenantId(lang), getMessage('TENANT_NOT_FOUND', lang));
+     }
+ 
+-    // Find unpaid invoice or last paid invoice
+-    if (assetId) {
+-      const invoicesRef = db.collection('users').doc(assetId).collection('invoices');
+-      const tenantIdNum = parseInt(tenantId);
+-      const searchIds = isNaN(tenantIdNum) ? [tenantId] : [tenantId, tenantIdNum];
+-
+-      // Search for unpaid invoices first
+-      const unpaidSnapshot = await invoicesRef
+-        .where('tenantId', 'in', searchIds)
+-        .where('isPaid', '==', false)
+-        .get();
+-
+-      if (!unpaidSnapshot.empty) {
+-        const invoiceDoc = unpaidSnapshot.docs[0];
+-        foundInvoice = {
+-          id: invoiceDoc.id,
+-          ...(invoiceDoc.data() as any),
+-        };
+-      }
+-    }
+-
+     if (!foundInvoice) {
+       logger.warn('No invoice found for tenant', { tenantId });
+       return withNotice(promptTenantId(lang), getMessage('INVOICE_NOT_FOUND', lang));
+@@ -359,9 +366,6 @@ export async function handlePayRentMpesa(phone: string, input: string, session:
+       return promptTenantId(lang);
+     }
+ 
+-    // Lipa Mos Mos: pay a little at a time
+-    if (response === 'LMM') return startLmm(phone, session);
+-
+     // Handle CONTINUE
+     if (['CONTINUE', 'ENDELEA', 'YES', 'NDIO'].includes(response)) {
+       logger.info('User proceeding to payment', { phone });
+diff --git a/functions/src/services/lmmx.client.ts b/functions/src/services/lmmx.client.ts
+new file mode 100644
+index 0000000..0bd0f06
+--- /dev/null
++++ b/functions/src/services/lmmx.client.ts
+@@ -0,0 +1,141 @@
++/**
++ * Lipa Mdogo Mdogo (standalone) client for the WhatsApp bot. Every call goes to a PAY callable
++ * (`https://africa-south1-plot-9fd6e.cloudfunctions.net/<lmmx_bot_*>`) through `callCloudFunction`, signed as the LMMX
++ * contract section S4 says: `sig` = lowercase hex HMAC-SHA256 of `botSigMessage(op, ts, nonce, payload)` with
++ * `LMMX_BOT_KEY` from the shared secret bundle. All money and identity decisions stay in PAY; the bot only asks.
++ *
++ * `LMMX_MOCK=1` answers every op from fixtures (no network, no secret), so the flows can be tried before PAY ships.
++ */
++import { createHmac, randomBytes } from 'crypto';
++import { callCloudFunction } from './payment.service';
++import { bundleSecret } from '../config/secretsBundle';
++import {
++  BotAuth,
++  BotConfirmCodeOut,
++  BotJoinInfoOut,
++  BotLookupOut,
++  BotPayOut,
++  BotQuoteOut,
++  LmmxCallableMap,
++  LmmxErrorCode,
++  botSigMessage,
++  normalizeKePhone,
++  parseLmmxCode,
++  quoteInstalment,
++} from '../types/lmmx.contract';
++
++const BASE = process.env.PAY_FUNCTIONS_BASE || 'https://africa-south1-plot-9fd6e.cloudfunctions.net';
++/** A signed call is valid for 5 minutes, so a call that has not answered in 25 seconds is treated as unknown, not as failed. */
++const TIMEOUT_MS = 25_000;
++
++export type BotOp = 'lmmx_bot_lookup' | 'lmmx_bot_quote' | 'lmmx_bot_pay' | 'lmmx_bot_confirmCode' | 'lmmx_bot_joinInfo';
++type Payload<K extends BotOp> = Omit<LmmxCallableMap[K]['in'], keyof BotAuth>;
++
++/** `code` is PAY's `details.lmmx` when it sent one; `timeout` means we do not know whether PAY did the work. */
++export class LmmxBotError extends Error {
++  constructor(message: string, readonly code?: LmmxErrorCode, readonly timeout = false) {
++    super(message);
++    this.name = 'LmmxBotError';
++  }
++}
++
++/** The three fields PAY checks. Pure, so the contract's test vector can pin it. */
++export function signBotCall(op: string, payload: Record<string, unknown>, key: string, ts: number, nonce: string): BotAuth {
++  const sig = createHmac('sha256', key).update(botSigMessage(op, ts, nonce, payload)).digest('hex');
++  return { ts, nonce, sig };
++}
++
++export const isMock = (): boolean => process.env.LMMX_MOCK === '1';
++
++async function call<K extends BotOp>(op: K, payload: Payload<K>): Promise<LmmxCallableMap[K]['out']> {
++  if (isMock()) return mockCall(op, payload as Record<string, unknown>) as LmmxCallableMap[K]['out'];
++  const key = bundleSecret('LMMX_BOT_KEY').value();
++  if (!key) throw new LmmxBotError('LMMX_BOT_KEY is not set');
++  const auth = signBotCall(op, payload as Record<string, unknown>, key, Date.now(), randomBytes(16).toString('hex'));
++  let timer: NodeJS.Timeout | undefined;
++  const timeout = new Promise<never>((_, reject) => {
++    timer = setTimeout(() => reject(new LmmxBotError('PAY did not answer in time', undefined, true)), TIMEOUT_MS);
++  });
++  try {
++    const res = await Promise.race([callCloudFunction(`${BASE}/${op}`, { ...payload, ...auth }), timeout]);
++    if (res?.error) throw new LmmxBotError(String(res.error.message || 'request failed'), res.error.details?.lmmx as LmmxErrorCode | undefined);
++    if (!res || res.rawResponse !== undefined) throw new LmmxBotError('unreadable answer from PAY');
++    return res as LmmxCallableMap[K]['out'];
++  } finally {
++    if (timer) clearTimeout(timer);
++  }
++}
++
++// The sender number is the WhatsApp sender (contract S4), always E.164.
++export const lookup = (phone: string, idNumber: string): Promise<BotLookupOut> => call('lmmx_bot_lookup', { phone, idNumber });
++export const quote = (phone: string, idNumber: string, creditMinor: number): Promise<BotQuoteOut> => call('lmmx_bot_quote', { phone, idNumber, creditMinor });
++export const pay = (phone: string, idNumber: string, quoteId: string, payerPhone: string): Promise<BotPayOut> =>
++  call('lmmx_bot_pay', { phone, idNumber, quoteId, payerPhone });
++export const confirmCode = (phone: string, text: string): Promise<BotConfirmCodeOut> => call('lmmx_bot_confirmCode', { phone, text });
++export const joinInfo = (): Promise<BotJoinInfoOut> => call('lmmx_bot_joinInfo', {});
++
++// ── Mock mode ────────────────────────────────────────────────────────────
++/**
++ * Fixtures by ID number (any phone): 11111111 active standalone tenant, 22222222 legacy (landlord on Plot Yangu),
++ * 33333333 frozen, 44444444 awaiting setup, anything else none (also what a phone/ID mismatch looks like).
++ * Codes: LMM4683 setup confirmed, LMM5555 change confirmed, LMC4683 change cancelled, LMM0000 expired, LMM9999 locked,
++ * LMM2222 not found, any other LMM/LMC code invalid. Paying from 0700000000 is refused (LMMX_E_STATE); from 0711111111 it times out.
++ */
++const MOCK_RENT = 1_000_000;
++const MOCK_REMAINING = 750_000;
++
++function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
++  switch (op) {
++    case 'lmmx_bot_lookup': {
++      const id = String(p.idNumber);
++      const standalone = { firstName: 'Mary', rentMinor: MOCK_RENT, remainingMinor: MOCK_REMAINING, dueDate: '2026-12-05', payByDate: '2026-12-02', suggestedCreditMinor: 250_000 };
++      if (id === '11111111') return { kind: 'standalone', standalone } satisfies BotLookupOut;
++      if (id === '22222222') return { kind: 'legacy' } satisfies BotLookupOut;
++      if (id === '33333333') return { kind: 'standalone', standalone: { ...standalone, frozen: true } } satisfies BotLookupOut;
++      if (id === '44444444') return { kind: 'standalone', standalone: { ...standalone, awaitingSetup: true } } satisfies BotLookupOut;
++      return { kind: 'none' } satisfies BotLookupOut;
++    }
++    case 'lmmx_bot_quote': {
++      const credit = Number(p.creditMinor);
++      if (!Number.isInteger(credit) || credit < 1_000 || credit > MOCK_REMAINING) throw new LmmxBotError('amount not allowed', 'LMMX_E_AMOUNT');
++      const q = quoteInstalment({ creditMinor: credit, rentMinor: MOCK_RENT, channel: 'till', remainingRentMinor: MOCK_REMAINING });
++      return {
++        quoteId: `mock-quote-${credit}`,
++        expiresAt: Date.now() + 10 * 60_000,
++        creditMinor: q.creditMinor,
++        transferReserveMinor: q.transferReserveMinor,
++        serviceFeeMinor: q.serviceFeeMinor,
++        collectionAllowanceMinor: q.collectionAllowanceMinor,
++        chargeMinor: q.chargeMinor,
++        feesMinor: q.feesMinor,
++        payByDate: '2026-12-02',
++        remainingAfterMinor: MOCK_REMAINING - credit,
++      } satisfies BotQuoteOut;
++    }
++    case 'lmmx_bot_pay': {
++      const payer = String(p.payerPhone);
++      if (payer === '+254700000000') throw new LmmxBotError('cannot take a payment', 'LMMX_E_STATE');
++      if (payer === '+254711111111') throw new LmmxBotError('PAY did not answer in time', undefined, true);
++      const credit = Number(String(p.quoteId).replace('mock-quote-', ''));
++      const q = quoteInstalment({ creditMinor: credit, rentMinor: MOCK_RENT, channel: 'till', remainingRentMinor: MOCK_REMAINING });
++      return { reference: 'LMX_MOCK_1', displayText: 'Check your phone for the M-PESA prompt', chargeMinor: q.chargeMinor } satisfies BotPayOut;
++    }
++    case 'lmmx_bot_confirmCode': {
++      const parsed = parseLmmxCode(p.text);
++      const full = parsed ? `${parsed.kind === 'otp' ? 'LMM' : 'LMC'}${parsed.code}` : '';
++      const phoneOk = normalizeKePhone(p.phone) !== null;
++      if (!parsed || !phoneOk) return { result: 'invalid' } satisfies BotConfirmCodeOut;
++      switch (full) {
++        case 'LMM4683': return { result: 'setup_confirmed', summary: 'Rent KES 10,000 due on the 5th.' } satisfies BotConfirmCodeOut;
++        case 'LMM5555': return { result: 'change_confirmed', summary: 'It starts on 8 Dec.' } satisfies BotConfirmCodeOut;
++        case 'LMC4683': return { result: 'change_cancelled' } satisfies BotConfirmCodeOut;
++        case 'LMM0000': return { result: 'expired' } satisfies BotConfirmCodeOut;
++        case 'LMM9999': return { result: 'locked' } satisfies BotConfirmCodeOut;
++        case 'LMM2222': return { result: 'not_found' } satisfies BotConfirmCodeOut;
++        default: return { result: 'invalid' } satisfies BotConfirmCodeOut;
++      }
++    }
++    case 'lmmx_bot_joinInfo':
++      return { supportPhones: ['0791286165', '0101716473'], text: 'Samuhia sets you up at a desk in a few minutes. Your landlord does not need to join.' } satisfies BotJoinInfoOut;
++  }
++}
+diff --git a/functions/src/types/lmmx.contract.ts b/functions/src/types/lmmx.contract.ts
+new file mode 100644
+index 0000000..1cbf8b4
+--- /dev/null
++++ b/functions/src/types/lmmx.contract.ts
+@@ -0,0 +1,453 @@
++/**
++ * LMMX CONTRACT v1  (Lipa Mdogo Mdogo, standalone tenants)  -  single source of truth
++ *
++ * SELF-CONTAINED: no imports. Types, plain constants and small PURE helpers only. It is copied VERBATIM (byte-identical) to:
++ *   PAY   functions/src/lmmx/contract.ts      <- canonical copy, owned by CORE
++ *   PAY   src/lmmx/contract.ts                (tenant web UI)
++ *   DESK  src/desk/api/lmmxContract.ts        (desk web UI)
++ *   DESK  functions/src/types/lmmx.contract.ts (WhatsApp bot)
++ * Nobody edits their copy. A change goes to CORE as a Contract Change Request (see LMM_CONTRACT.md section 15).
++ *
++ * All money is integer MINOR units (KES x 100). Instalment credits are WHOLE SHILLINGS (multiples of 100). Timestamps are epoch ms.
++ * Dates are Africa/Nairobi calendar days "YYYY-MM-DD". User-facing brand: "Lipa Mdogo Mdogo". Internal names keep "lmm"/"lmmx".
++ */
++
++export const LMMX_CONTRACT_VERSION = 1;
++export const LMMX_REGION = "africa-south1";           // every lmmx_* callable
++export const LMMX_BRAND = "Lipa Mdogo Mdogo";
++export const LMMX_TOP_DESK = "COG-0000";
++export const LMMX_BOT_PHONE_E164 = "+254101716473";   // WhatsApp bot 0101716473
++export const LMMX_BOT_LINK = "https://wa.me/254101716473";
++export const LMMX_LANDLORD_URL = "https://plot.samuhia.co.ke/";
++export const LMMX_PAYMENT_REF_PREFIX = "LMX_";         // Paystack charge references (legacy LMM uses "LMM_")
++export const LMMX_TRANSFER_REF_PREFIX = "lmx-";        // Paystack transfer references (legacy LMM uses "lmm-")
++
++// ------------------------------------------------------------------------------------------------------------- money rules
++export const LMMX = {
++  MIN_CREDIT_MINOR: 1_000,              // KES 10 per instalment
++  MAX_CREDIT_MINOR: 15_000_000,         // KES 150,000 per instalment
++  RENT_MIN_MINOR: 100_000,              // KES 1,000
++  RENT_MAX_MINOR: 15_000_000,           // KES 150,000 (Paystack's M-PESA wallet limit per transfer)
++  /** Paystack's card/M-PESA collection fee. Transfers are NOT part of it. */
++  COLLECTION_BPS: 150,
++  /** What a transfer really costs us: Paystack's listed cost x 1.2 (assumed excise), rounded up to a shilling, plus KES 5. Confirm on a real Paystack statement. */
++  TRANSFER_UPLIFT_BPS: 12_000,
++  TRANSFER_BUFFER_MINOR: 500,
++  /** Service fee, by instalment credit (minor units): bps of the credit. Larger instalments are cheaper. */
++  SERVICE_BANDS: [
++    { fromMinor: 1_000, bps: 600 },     // KES 10 - 99
++    { fromMinor: 10_000, bps: 400 },    // KES 100 - 499
++    { fromMinor: 50_000, bps: 300 },    // KES 500 - 1,999
++    { fromMinor: 200_000, bps: 200 },   // KES 2,000 - 4,999
++    { fromMinor: 500_000, bps: 150 },   // KES 5,000 and above
++  ] as const,
++  /** The desk keeps this share of the service fee, paid at once through the Paystack flat split. The platform keeps the rest. */
++  DESK_SHARE_BPS: 6_000,
++  /** KES 25 to the desk when a tenant's cycle is fully credited by its due date (needs at least 2 instalments). Paid as a top-desk payable. */
++  COMPLETION_BONUS_MINOR: 2_500,
++  DUE_DAY_DEFAULT: 5, DUE_DAY_MIN: 1, DUE_DAY_MAX: 28,
++  DUE_DAY_CHANGES_PER_CYCLE: 1, DUE_DAY_LOCK_DAYS_BEFORE_DUE: 5,
++  /** The first cycle's due date is the next dueDay that is at least this many days away. */
++  FIRST_DUE_MIN_DAYS: 7,
++  WARN_DAYS_BEFORE_DUE: 5,
++  // security
++  OTP_PREFIX: "LMM", OTP_DIGITS: 4, OTP_TTL_MS: 30 * 60_000, OTP_MAX_ATTEMPTS: 5, OTP_SETUP_TOTAL_ATTEMPTS_MAX: 10,
++  OTP_LOCK_MS: 3_600_000, OTP_RESEND_MAX_PER_HOUR: 3,
++  CANCEL_PREFIX: "LMC",
++  SETUP_EXPIRY_MS: 72 * 3_600_000,
++  CHANGE_COOLING_OFF_MS: 48 * 3_600_000,
++  CHANGE_DEFER_DAYS_BEFORE_DUE: 3,
++  FIRST_PAYOUT_MIN_RECIPIENT_AGE_MS: 48 * 3_600_000,
++  LANDLORD_NOTICE_MIN_BEFORE_PAYOUT_MS: 24 * 3_600_000,
++  DESK_NEW_TENANTS_PER_DAY: 15,
++  DESK_RECIPIENT_CHECKS_PER_DAY: 20,
++  RECIPIENT_TENANTS_BEFORE_REVIEW: 3,
++  SMS_MAX_CHARS: 280,
++} as const;
++
++// ------------------------------------------------------------------------------------------------------------- enums
++export type Channel = "phone" | "till" | "bank";          // M-PESA phone, M-PESA till, bank (paybill is NOT supported)
++export const CHANNELS: readonly Channel[] = ["phone", "till", "bank"];
++/** Paystack transfer-recipient type for each channel (identical to PAY's existing lmm/recipient.ts). */
++export const PAYSTACK_TYPE: Record<Channel, "mobile_money" | "mobile_money_business" | "kepss"> = { phone: "mobile_money", till: "mobile_money_business", bank: "kepss" };
++export const PAYSTACK_BANK_CODE: Partial<Record<Channel, string>> = { phone: "MPESA", till: "MPTILL" };
++export type IdType = "national_id" | "alien_id" | "passport";
++export type Frequency = "daily" | "weekly" | "biweekly";
++export const FREQUENCIES: readonly Frequency[] = ["daily", "weekly", "biweekly"];
++export type TenantStatus = "draft" | "awaiting_confirmation" | "active" | "paused" | "frozen" | "closed" | "migrated";
++export type CycleStatus = "open" | "funded" | "partial_settled" | "settled" | "closed" | "refunded";
++export type RecipientStatus = "pending" | "verified" | "needs_review" | "frozen" | "retired";
++export type NameMatch = "matched" | "mismatch" | "unavailable";
++export type ChangeKind = "recipient" | "rent";
++export type ChangeStatus = "awaiting_tenant_otp" | "cooling_off" | "deferred" | "applied" | "cancelled" | "expired" | "rejected";
++export type LeadStage = "new" | "to_contact" | "contacted" | "interested" | "follow_up" | "not_interested" | "closed_won" | "closed_lost";
++export const LEAD_STAGES: readonly LeadStage[] = ["new", "to_contact", "contacted", "interested", "follow_up", "not_interested", "closed_won", "closed_lost"];
++export type AuditAction =
++  | "tenant_created" | "setup_otp_sent" | "setup_otp_failed" | "setup_confirmed" | "setup_expired" | "recipient_checked" | "recipient_created" | "recipient_reused"
++  | "recipient_review_decided" | "change_requested" | "change_otp_failed" | "change_confirmed" | "change_cancelled" | "change_applied" | "tenant_link" | "due_day_changed"
++  | "plan_changed" | "payment_credited" | "payment_rejected" | "settlement_started" | "settlement_paid" | "settlement_failed" | "refund" | "freeze" | "unfreeze"
++  | "reassign" | "reveal" | "top_update" | "landlord_matched" | "tamper_detected" | "rate_limited" | "signature_failed" | "audit_verified" | "lead_updated" | "bonus_accrued";
++
++export type LmmxErrorCode =
++  | "LMMX_E_AUTH" | "LMMX_E_FORBIDDEN" | "LMMX_E_SIG" | "LMMX_E_RATE" | "LMMX_E_VALIDATION" | "LMMX_E_DUPLICATE" | "LMMX_E_NOT_FOUND" | "LMMX_E_OTP_INVALID"
++  | "LMMX_E_OTP_LOCKED" | "LMMX_E_OTP_EXPIRED" | "LMMX_E_REVIEW_REQUIRED" | "LMMX_E_FROZEN" | "LMMX_E_DISABLED" | "LMMX_E_AMOUNT" | "LMMX_E_QUOTE" | "LMMX_E_STATE"
++  | "LMMX_E_TAMPER" | "LMMX_E_RECIPIENT_BLOCKED" | "LMMX_E_NEEDS_REAUTH" | "LMMX_E_DESK_NOT_READY" | "LMMX_E_INTERNAL";
++/** CORE throws Firebase HttpsError(code, message, { lmmx: LmmxErrorCode }). `details.lmmx` is what UIs switch on; `message` is safe to show. */
++
++// ------------------------------------------------------------------------------------------------------------- pure helpers
++/** "07.. / 01.. / 7.. / 1.. / 254.. / +254.." -> "+2547XXXXXXXX" or "+2541XXXXXXXX"; null when it is not a Kenyan mobile. */
++export function normalizeKePhone(raw: unknown): string | null {
++  const d = String(raw ?? "").replace(/[^\d+]/g, "").replace(/^\+/, "");
++  let n: string;
++  if (/^254[17]\d{8}$/.test(d)) n = d;
++  else if (/^0[17]\d{8}$/.test(d)) n = "254" + d.slice(1);
++  else if (/^[17]\d{8}$/.test(d)) n = "254" + d;
++  else return null;
++  return "+" + n;
++}
++export const maskPhone = (e164: string): string => (e164.length >= 6 ? `${e164.slice(0, 4)}*****${e164.slice(-3)}` : "***");
++export const maskId = (id: string): string => (id.length <= 4 ? "****" : `${id.slice(0, 2)}${"*".repeat(Math.max(2, id.length - 4))}${id.slice(-2)}`);
++export const maskName = (full: string): string => {
++  const p = full.trim().split(/\s+/).filter(Boolean);
++  return p.length === 0 ? "" : p.length === 1 ? p[0] : `${p[0]} ${p[p.length - 1].charAt(0).toUpperCase()}.`;
++};
++export const last3 = (acct: string): string => String(acct).replace(/\s+/g, "").slice(-3);
++export const channelLabel = (c: Channel): string => (c === "phone" ? "M-PESA" : c === "till" ? "TILL" : "BANK");
++export const kes = (minor: number): string => {
++  const v = minor / 100;
++  return `KES ${Number.isInteger(v) ? v.toLocaleString("en-KE") : v.toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
++};
++
++/** Valid ID number shapes (the server also validates): national / alien ID 6-9 digits, passport 6-9 letters or digits. */
++export function validIdNumber(type: IdType, v: string): boolean {
++  const s = v.trim();
++  return type === "passport" ? /^[A-Za-z0-9]{6,9}$/.test(s) : /^\d{6,9}$/.test(s);
++}
++
++// ---- OTP text. The SMS, the bot and the desk UI all use exactly this shape: "LMM4683" (setup / change) and "LMC7391" (cancel a change).
++export const otpText = (code4: string): string => `${LMMX.OTP_PREFIX}${code4}`;
++export const cancelText = (code4: string): string => `${LMMX.CANCEL_PREFIX}${code4}`;
++/** Recognises a message that is only an LMMX code (case and spaces forgiven). Anything else returns null. */
++export function parseLmmxCode(text: unknown): { kind: "otp" | "cancel"; code: string } | null {
++  const m = /^\s*(LMM|LMC)\s?-?(\d{4})\s*$/i.exec(String(text ?? ""));
++  return m ? { kind: m[1].toUpperCase() === "LMM" ? "otp" : "cancel", code: m[2] } : null;
++}
++export const botConfirmLink = (code4: string): string => `${LMMX_BOT_LINK}?text=${otpText(code4)}`;
++
++// ---- dates (Africa/Nairobi, no DST)
++const EAT = 3 * 3_600_000, DAY = 86_400_000;
++export const eatDate = (now: number): string => new Date(now + EAT).toISOString().slice(0, 10);
++export const clampDueDay = (d: number): number => Math.min(LMMX.DUE_DAY_MAX, Math.max(LMMX.DUE_DAY_MIN, Math.trunc(d)));
++const pad = (n: number) => String(n).padStart(2, "0");
++const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY);
++/** Next date with this day-of-month that is at least `minDays` after `todayIso`. */
++export function nextDueDate(todayIso: string, dueDay: number, minDays = 0): string {
++  let y = Number(todayIso.slice(0, 4)), m = Number(todayIso.slice(5, 7));
++  for (let i = 0; i < 14; i++) {
++    const iso = `${y}-${pad(m)}-${pad(clampDueDay(dueDay))}`;
++    if (dayDiff(iso, todayIso) >= minDays) return iso;
++    m += 1; if (m > 12) { m = 1; y += 1; }
++  }
++  throw new RangeError("no due date found");
++}
++export const firstDueDate = (todayIso: string, dueDay: number): string => nextDueDate(todayIso, dueDay, LMMX.FIRST_DUE_MIN_DAYS);
++export const daysUntil = (iso: string, todayIso: string): number => dayDiff(iso, todayIso);
++export const shortDate = (iso: string): string => {
++  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
++  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
++  return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1]}` : iso;
++};
++
++// ---- the fee engine (CORE recomputes every number; UIs use these for previews and MUST show what CORE returns on a real quote)
++/** What Paystack lists for one transfer, by channel and amount sent (identical to PAY lmm/config.ts PAYSTACK_TRANSFER_COST). */
++export const PAYSTACK_TRANSFER_COST: Record<Channel, readonly { upToMinor: number; costMinor: number }[]> = {
++  phone: [{ upToMinor: 150_000, costMinor: 2_000 }, { upToMinor: 2_000_000, costMinor: 4_000 }, { upToMinor: 15_000_000, costMinor: 6_000 }],
++  till: [{ upToMinor: 150_000, costMinor: 4_000 }, { upToMinor: 1_000_000, costMinor: 8_000 }, { upToMinor: 4_000_000, costMinor: 14_000 }, { upToMinor: 99_900_000, costMinor: 18_000 }],
++  bank: [{ upToMinor: 1_000_000, costMinor: 8_000 }, { upToMinor: 5_000_000, costMinor: 12_000 }, { upToMinor: 99_999_900, costMinor: 14_000 }],
++};
++const ceilDiv = (a: number, b: number): number => Math.ceil(a / b);
++const wholeShilling = (minor: number): number => Math.ceil(minor / 100) * 100;
++export function transferCostMinor(amountMinor: number, channel: Channel): number {
++  const t = PAYSTACK_TRANSFER_COST[channel].find((x) => amountMinor <= x.upToMinor);
++  if (!t) throw new RangeError("amount is above the transfer limit");
++  return t.costMinor;
++}
++/** F: what one payout of `amountMinor` must reserve from the tenant (cost x 1.2, whole shilling, + KES 5). */
++export const transferReserveMinor = (amountMinor: number, channel: Channel): number =>
++  wholeShilling(ceilDiv(transferCostMinor(amountMinor, channel) * LMMX.TRANSFER_UPLIFT_BPS, 10_000)) + LMMX.TRANSFER_BUFFER_MINOR;
++export function serviceBps(creditMinor: number): number {
++  let bps: number = LMMX.SERVICE_BANDS[0].bps;
++  for (const b of LMMX.SERVICE_BANDS) if (creditMinor >= b.fromMinor) bps = b.bps;
++  return bps;
++}
++export function isValidCredit(creditMinor: unknown): creditMinor is number {
++  return typeof creditMinor === "number" && Number.isSafeInteger(creditMinor) && creditMinor % 100 === 0 && creditMinor >= LMMX.MIN_CREDIT_MINOR && creditMinor <= LMMX.MAX_CREDIT_MINOR;
++}
++export interface QuoteInput {
++  creditMinor: number;                 // x: what reaches the rent
++  rentMinor: number;                   // R: the cycle's rent (for a top-up leg: the remaining rent that leg will pay out)
++  channel: Channel;
++  reserveCollectedMinor?: number;      // transfer reserve already collected for this payout leg (default 0)
++  remainingRentMinor?: number;         // rent still owed before this instalment (default = rentMinor); equals creditMinor on the last instalment
++}
++export interface Quote {
++  creditMinor: number; transferReserveMinor: number; serviceFeeMinor: number; collectionAllowanceMinor: number;
++  chargeMinor: number;                 // g: what the tenant pays (whole shilling)
++  feesMinor: number;                   // g - x
++  deskShareMinor: number; platformShareMinor: number;
++}
++/**
++ * T = ceil(x*F/R), but the last instalment of a payout leg takes whatever is left of F, so the leg's total is exactly F and the landlord is paid EXACTLY the credits.
++ * S = ceil(x*bps/10000).  g = whole shilling of ceil((x+T+S) / (1 - 1.5%)).  Desk = floor(S*60%).
++ */
++export function quoteInstalment(i: QuoteInput): Quote {
++  if (!Number.isSafeInteger(i.rentMinor) || i.rentMinor <= 0) throw new RangeError("rent must be a positive integer");
++  const remaining = i.remainingRentMinor ?? i.rentMinor;
++  const last = i.creditMinor >= remaining;
++  // The FINAL instalment of a leg may be below the KES 10 minimum (whole shillings, at least KES 1) so a tenant is never stuck with a crumb.
++  const okCredit = isValidCredit(i.creditMinor) || (last && Number.isSafeInteger(i.creditMinor) && i.creditMinor % 100 === 0 && i.creditMinor >= 100 && i.creditMinor <= LMMX.MAX_CREDIT_MINOR);
++  if (!okCredit) throw new RangeError("credit must be whole shillings between the minimum and maximum instalment");
++  const F = transferReserveMinor(i.rentMinor, i.channel);
++  const collected = i.reserveCollectedMinor ?? 0;
++  const T = last ? Math.max(0, F - collected) : Math.min(ceilDiv(i.creditMinor * F, i.rentMinor), Math.max(0, F - collected));
++  const S = ceilDiv(i.creditMinor * serviceBps(i.creditMinor), 10_000);
++  const raw = ceilDiv((i.creditMinor + T + S) * 10_000, 10_000 - LMMX.COLLECTION_BPS);
++  const g = wholeShilling(raw);
++  const desk = Math.floor((S * LMMX.DESK_SHARE_BPS) / 10_000);
++  return { creditMinor: i.creditMinor, transferReserveMinor: T, serviceFeeMinor: S, collectionAllowanceMinor: g - i.creditMinor - T - S, chargeMinor: g, feesMinor: g - i.creditMinor, deskShareMinor: desk, platformShareMinor: S - desk };
++}
++/** The invariant CORE checks on every payment: after Paystack's collection fee, the charge still covers credit + reserve + service. */
++export const quoteCoversCosts = (q: Quote): boolean => q.chargeMinor - ceilDiv(q.chargeMinor * LMMX.COLLECTION_BPS, 10_000) >= q.creditMinor + q.transferReserveMinor + q.serviceFeeMinor;
++
++export interface EarningsRow { creditMinor: number; chargeMinor: number; feesMinor: number; feePct: number; deskShareMinor: number }
++/** What a desk earns per instalment size, for the earnings table on the tenant screen. */
++export function earningsTable(rentMinor: number, channel: Channel, sizes: readonly number[] = [10_000, 50_000, 100_000, 250_000, 500_000]): EarningsRow[] {
++  return sizes.filter((x) => x <= rentMinor).concat(rentMinor).filter((v, i, a) => a.indexOf(v) === i).map((x) => {
++    const q = quoteInstalment({ creditMinor: x, rentMinor, channel });
++    return { creditMinor: x, chargeMinor: q.chargeMinor, feesMinor: q.feesMinor, feePct: Math.round((q.feesMinor * 10_000) / x) / 100, deskShareMinor: q.deskShareMinor };
++  });
++}
++/** Whole-cycle projection if the tenant pays in equal instalments of `creditMinor` (last one takes the remainder). Includes the completion bonus when there are 2+ instalments. */
++export function cycleProjection(rentMinor: number, channel: Channel, creditMinor: number): { instalments: number; tenantPaysMinor: number; feesMinor: number; deskMinor: number; deskBonusMinor: number } {
++  let left = rentMinor, collected = 0, paid = 0, desk = 0, n = 0;
++  while (left > 0) {
++    let x = Math.min(creditMinor, left);
++    if (left - x > 0 && left - x < LMMX.MIN_CREDIT_MINOR) x = left;   // never leave a crumb below the minimum: fold it into this instalment
++    const q = quoteInstalment({ creditMinor: x, rentMinor, channel, reserveCollectedMinor: collected, remainingRentMinor: left });
++    collected += q.transferReserveMinor; paid += q.chargeMinor; desk += q.deskShareMinor; left -= x; n += 1;
++  }
++  return { instalments: n, tenantPaysMinor: paid, feesMinor: paid - rentMinor, deskMinor: desk, deskBonusMinor: n >= 2 ? LMMX.COMPLETION_BONUS_MINOR : 0 };
++}
++
++// ------------------------------------------------------------------------------------------------------------- SMS texts (GSM-7 only, 280 max)
++const GSM = /[^\x20-\x7E]/g;
++export const fitSms = (t: string): string => { const c = t.replace(GSM, "").replace(/\s+/g, " ").trim(); return c.length <= LMMX.SMS_MAX_CHARS ? c : c.slice(0, LMMX.SMS_MAX_CHARS).trimEnd(); };
++/** User-supplied words placed in an SMS: letters, digits, space and a few safe marks only; no links; cut to `max`. */
++export const smsSafe = (s: string, max = 24): string => s.replace(/https?:\/\/\S+|www\.\S+/gi, "").replace(/[^A-Za-z0-9 .,'&-]/g, "").replace(/\s+/g, " ").trim().slice(0, max);
++export const lmmxText = {
++  /** M1 to the TENANT when a desk creates the setup. Carries the OTP and the one-tap WhatsApp link. */
++  setup: (p: { rentMinor: number; landlordName: string; channel: Channel; acct: string; dueDay: number; deskCode: string; code4: string }) =>
++    fitSms(`${LMMX_BRAND}: pay rent ${kes(p.rentMinor)} to ${smsSafe(p.landlordName)} (${channelLabel(p.channel)} ...${last3(p.acct)}) by day ${p.dueDay} monthly. Desk ${p.deskCode}. Code ${otpText(p.code4)} valid 30 min. Tap to confirm: ${botConfirmLink(p.code4)} or give the code to your desk.`),
++  /** M2 to the TENANT when setup completes. */
++  active: (p: { rentMinor: number; dueDay: number; supportPhone: string }) =>
++    fitSms(`${LMMX_BRAND} is ready. Rent ${kes(p.rentMinor)}, due day ${p.dueDay}. Pay any amount from KES 10 anytime; your landlord gets the full rent on the due date. Pay or check: ${LMMX_BOT_LINK} Help: ${p.supportPhone}`),
++  /** M3 to the LANDLORD when setup completes. */
++  landlord: (p: { tenantFirstName: string; rentMinor: number; dueDay: number; supportPhone: string }) =>
++    fitSms(`Samuhia: ${smsSafe(p.tenantFirstName, 16)} will pay you ${kes(p.rentMinor)} rent monthly via ${LMMX_BRAND}, in small amounts, sent in full on day ${p.dueDay}. Not right? Call ${p.supportPhone}. Collect rent free: ${LMMX_LANDLORD_URL}`),
++  /** M4 to the TENANT for a change that needs their OTP. */
++  change: (p: { deskCode: string; summary: string; code4: string }) =>
++    fitSms(`${LMMX_BRAND}: desk ${p.deskCode} asks to change ${smsSafe(p.summary, 80)}. Code ${otpText(p.code4)} valid 30 min. Share it only if you agree. Confirm: ${botConfirmLink(p.code4)}`),
++  /** M5 to the TENANT after they confirm a change that waits out the cooling-off. */
++  changeConfirmed: (p: { applyDate: string; cancel4: string }) =>
++    fitSms(`${LMMX_BRAND}: change confirmed, it starts ${shortDate(p.applyDate)}. To cancel before then send ${cancelText(p.cancel4)} to ${LMMX_BOT_LINK} or tell the PAY app.`),
++  /** M6 to the OLD and the NEW landlord contact on a payout-account change. */
++  landlordChange: (p: { tenantFirstName: string; applyDate: string; supportPhone: string; kind: "old" | "new"; rentMinor: number; dueDay: number }) =>
++    p.kind === "old"
++      ? fitSms(`Samuhia: rent from ${smsSafe(p.tenantFirstName, 16)} will go to a different account from ${shortDate(p.applyDate)}. Not right? Call ${p.supportPhone}.`)
++      : fitSms(`Samuhia: ${smsSafe(p.tenantFirstName, 16)} will pay you ${kes(p.rentMinor)} rent monthly from ${shortDate(p.applyDate)} via ${LMMX_BRAND}, sent in full on day ${p.dueDay}. Not right? Call ${p.supportPhone}. ${LMMX_LANDLORD_URL}`),
++};
++
++// ------------------------------------------------------------------------------------------------------------- shared shapes
++export interface RecipientInput {
++  channel: Channel; bankCode?: string;            // bankCode only for channel "bank" (from the existing listKenyaBanks callable)
++  accountNumber: string; accountName: string;     // the name the landlord is registered under
++  contactName: string; contactPhone: string;      // landlord or agency contact; gets the landlord SMS
++  reuseToken?: string;                            // from lmmx_desk_checkRecipient; only when the tenant confirmed it is the same landlord
++}
++export interface TenantProfileInput {
++  fullName: string; phone: string; idType: IdType; idNumber: string;
++  email?: string; unitNumber?: string; propertyName?: string;
++}
++export interface MoneyView { minor: number }
++export interface PendingChangeView { changeId: string; kind: ChangeKind; status: ChangeStatus; summary: string; coolingOffUntil?: number; applyAfter?: number; initiatedBy: "desk" | "top" | "tenant" }
++export interface CycleView {
++  cycleId: string; status: CycleStatus; dueDate: string; payByDate: string; rentMinor: number; creditedMinor: number; remainingMinor: number; settledMinor: number; pct: number;
++}
++export interface InstalmentView { paymentId: string; at: number; creditMinor: number; chargeMinor: number; feesMinor: number; deskShareMinor?: number; status: "success" | "failed" | "refunded" }
++export interface RecipientView { channel: Channel; accountNumber: string; resolvedNameMasked: string; nameMatch: NameMatch; status: RecipientStatus }
++export interface DeskTenantRow {
++  tenantId: string; nameMasked: string; phoneMasked: string; status: TenantStatus; rentMinor: number; dueDay: number; deskCode: string;
++  creditedMinor: number; remainingMinor: number; createdAt: number; awaitingSince?: number;
++}
++
++// ------------------------------------------------------------------------------------------------------------- DESK callables (Firebase Auth = desk agent; CORE reads desk_agents/{uid})
++export interface DeskCheckRecipientIn { channel: Channel; bankCode?: string; accountNumber: string; enteredName: string }
++/** Only the account number and booleans. Never another recipient's name, contact, tenants, desks or counts. */
++export interface DeskCheckRecipientOut { exists: boolean; accountNumber: string; nameMatchesEntered: boolean; reusable: boolean; reuseToken?: string }
++export interface DeskCreateTenantIn { profile: TenantProfileInput; rentMinor: number; dueDay?: number; frequency?: Frequency; recipient: RecipientInput; idempotencyKey: string }
++export interface DeskCreateTenantOut { tenantId: string; status: "awaiting_confirmation" | "draft"; nameMatch: NameMatch; needsReview: boolean; expiresAt: number; resolvedNameMasked: string }
++export interface DeskSetupStatusIn { tenantId: string }
++/** What the desk screen shows: "Waiting for verification" (awaiting, with a countdown) or an OTP box; active when done. */
++export interface DeskSetupStatusOut { tenantId: string; status: TenantStatus; otpExpiresAt?: number; attemptsLeft?: number; locked?: boolean; resendsLeft?: number; needsReview?: boolean }
++export interface DeskConfirmSetupIn { tenantId: string; otp: string }          // otp: "LMM4683" or "4683"
++export interface DeskConfirmSetupOut { tenantId: string; status: "active" }
++export interface DeskResendOtpIn { tenantId: string }
++export interface DeskResendOtpOut { otpExpiresAt: number; resendsLeft: number }
++export interface DeskListTenantsIn { q?: string; status?: TenantStatus; cursor?: string; limit?: number }   // top desk sees every desk's tenants; a desk only its own
++export interface DeskListTenantsOut { tenants: DeskTenantRow[]; nextCursor?: string }
++export interface DeskGetTenantIn { tenantId: string }
++export interface DeskGetTenantOut {
++  tenantId: string; status: TenantStatus; deskCode: string; nameMasked: string; phoneMasked: string; idMasked: string; unitNumber?: string; propertyName?: string;
++  rentMinor: number; dueDay: number; frequency: Frequency; recipient: RecipientView; cycle?: CycleView; recent: InstalmentView[];
++  earningsTable: EarningsRow[]; projection: { frequency: Frequency; instalments: number; tenantPaysMinor: number; deskMinor: number; deskBonusMinor: number };
++  pendingChange?: PendingChangeView; frozen?: boolean; createdAt: number;
++}
++export interface DeskRequestChangeIn { tenantId: string; kind: ChangeKind; rentMinor?: number; recipient?: RecipientInput; idempotencyKey: string }
++export interface DeskRequestChangeOut { changeId: string; status: ChangeStatus; requiresTenantOtp: boolean; coolingOffUntil?: number; applyAfter?: number; otpExpiresAt?: number }
++export interface DeskConfirmChangeIn { changeId: string; otp: string }
++export interface DeskConfirmChangeOut { changeId: string; status: ChangeStatus; applyAfter?: number }
++export interface DeskCancelChangeIn { changeId: string }
++export interface DeskCancelChangeOut { ok: boolean }
++export interface DeskEarningsIn { from: number; to: number }
++export interface DeskEarningsOut { instalments: number; deskShareMinor: number; completionBonusMinor: number; landlordBonusMinor: number; byTenant: { tenantId: string; nameMasked: string; deskShareMinor: number }[] }
++export interface DeskPreviewIn { rentMinor: number; channel: Channel; creditMinor?: number }
++export interface DeskPreviewOut { table: EarningsRow[]; projection: Record<Frequency, { instalments: number; tenantPaysMinor: number; deskMinor: number; deskBonusMinor: number }> }
++export interface PipelineRow { leadIdMasked: string; landlordLabel: string; tenants: number; monthlyRentMinor: number; stage: LeadStage; onPms: boolean; conversionNote: string }
++export interface DeskPipelineIn { cursor?: string }
++export interface DeskPipelineOut { landlords: PipelineRow[]; nextCursor?: string }
++
++// ------------------------------------------------------------------------------------------------------------- TOP DESK callables (COG-0000 only: verified @samuhia.co.ke, sign-in within 15 minutes, a written reason on every change)
++export interface TopReviewRow { recipientId: string; channel: Channel; accountNumber: string; reason: "name_mismatch" | "shared_recipient" | "other"; tenants: number; desks: number; createdAt: number }
++export interface TopReviewQueueOut { items: TopReviewRow[] }
++export interface TopReviewDecisionIn { recipientId: string; decision: "approve" | "reject"; reason: string }
++export interface TopFreezeIn { scope: "tenant" | "recipient" | "desk"; id: string; reason: string }
++export interface TopUnfreezeIn { scope: "tenant" | "recipient" | "desk"; id: string; reason: string }
++export interface TopReassignIn { tenantId: string; toDeskCode: string; reason: string }
++export interface TopRevealIn { tenantId: string; fields: ("phone" | "id" | "landlordContact" | "landlordName")[]; reason: string }
++export interface TopRevealOut { values: Partial<Record<"phone" | "id" | "landlordContact" | "landlordName", string>> }
++/** A change started by COG-0000 applies at once: no tenant OTP, no cooling-off. The tenant and both landlord contacts are told by SMS. */
++export interface TopUpdateTenantIn { tenantId: string; rentMinor?: number; recipient?: RecipientInput; dueDay?: number; reason: string }
++export interface AuditRow { seq: number; ts: number; action: AuditAction; actor: { type: "desk" | "top" | "tenant" | "system" | "bot"; deskCode?: string }; tenantId?: string; summary: string; hash: string }
++export interface TopAuditListIn { tenantId?: string; action?: AuditAction; deskCode?: string; from?: number; to?: number; cursor?: number; limit?: number }
++export interface TopAuditListOut { rows: AuditRow[]; nextCursor?: number }
++export interface TopAuditVerifyIn { fromSeq?: number; toSeq?: number }
++export interface TopAuditVerifyOut { ok: boolean; checked: number; brokenAtSeq?: number }
++export interface LeadRow { leadId: string; landlordLabel: string; tenants: number; monthlyRentMinor: number; deskCodes: string[]; stage: LeadStage; nextFollowUpAt?: number; onPms: boolean; updatedAt: number }
++export interface TopLeadsListIn { stage?: LeadStage; q?: string; cursor?: string; limit?: number }
++export interface TopLeadsListOut { leads: LeadRow[]; nextCursor?: string }
++export interface TopLeadGetIn { leadId: string }
++export interface TopLeadGetOut extends LeadRow { contactName: string; contactPhone: string; notes: { ts: number; by: string; text: string }[] }
++export interface TopLeadUpdateIn { leadId: string; stage?: LeadStage; note?: string; nextFollowUpAt?: number | null }
++export interface TopStatsOut { tenants: Record<TenantStatus, number>; creditedThisMonthMinor: number; settledThisMonthMinor: number; payoutsPaused: boolean; standaloneEnabled: boolean; openAlerts: number; reviewQueue: number }
++
++// ------------------------------------------------------------------------------------------------------------- TENANT callables (Firebase Auth = the tenant, phone-verified via sendLoginOtp/verifyLoginOtp)
++export interface TenantLinkIn { idType: IdType; idNumber: string }
++/** Same generic failure whether the phone or the ID was wrong. `kinds` says which accounts matched the verified phone AND the ID. */
++export interface TenantLinkOut { kinds: ("lmm" | "legacy")[] }
++export interface TenantSummaryOut {
++  status: TenantStatus; firstName: string; rentMinor: number; dueDay: number; frequency: Frequency; cycle?: CycleView; recipient: RecipientView;
++  suggestedCreditMinor: number; pendingChange?: PendingChangeView; awaitingSetup?: { otpExpiresAt: number; summary: string }; frozen?: boolean; supportPhone: string;
++}
++export interface TenantHistoryIn { cursor?: string }
++export interface TenantHistoryOut { items: InstalmentView[]; nextCursor?: string }
++export interface TenantQuoteIn { creditMinor: number }
++export interface TenantQuoteOut { quoteId: string; expiresAt: number; creditMinor: number; transferReserveMinor: number; serviceFeeMinor: number; collectionAllowanceMinor: number; chargeMinor: number; feesMinor: number; payByDate: string; remainingAfterMinor: number }
++export interface TenantPayIn { quoteId: string; payerPhone: string }
++export interface TenantPayOut { reference: string; displayText: string; chargeMinor: number }
++export interface TenantSetDueDayIn { dueDay: number }
++export interface TenantSetDueDayOut { dueDay: number; effectiveFromCycleDate: string }
++export interface TenantSetPlanIn { frequency: Frequency; suggestedCreditMinor?: number }
++export interface TenantConfirmSetupIn { otp: string }
++export interface TenantConfirmChangeIn { changeId: string; otp: string }
++export interface TenantCancelChangeIn { changeId: string; cancelCode: string }
++
++// ------------------------------------------------------------------------------------------------------------- BOT callables (the WhatsApp bot in DESK/functions)
++/** Every bot call carries { ..., ts, nonce, sig }: sig = hex HMAC-SHA256(key LMMX_BOT_KEY from app-secrets-bundle, `${op}|${ts}|${nonce}|${canonicalJson(payload without sig)}`), ts within 5 minutes. canonicalJson = JSON with keys sorted. */
++export interface BotAuth { ts: number; nonce: string; sig: string }
++/** JSON with object keys sorted at every level, no spaces. Both sides must produce the identical string. */
++export function canonicalJson(v: unknown): string {
++  if (v === null || typeof v !== "object") return JSON.stringify(v === undefined ? null : v);
++  if (Array.isArray(v)) return "[" + v.map(canonicalJson).join(",") + "]";
++  const o = v as Record<string, unknown>;
++  return "{" + Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => JSON.stringify(k) + ":" + canonicalJson(o[k])).join(",") + "}";
++}
++/** The exact string the bot signs: `${op}|${ts}|${nonce}|${canonicalJson(payload without ts, nonce, sig)}`. sig = lowercase hex HMAC-SHA256 of it with LMMX_BOT_KEY. */
++export function botSigMessage(op: string, ts: number, nonce: string, payload: Record<string, unknown>): string {
++  const { ts: _t, nonce: _n, sig: _s, ...rest } = payload as Record<string, unknown>;
++  void _t; void _n; void _s;
++  return `${op}|${ts}|${nonce}|${canonicalJson(rest)}`;
++}
++export const BOT_SIG_MAX_AGE_MS = 5 * 60_000;
++export type BotKind = "standalone" | "legacy" | "none";
++export interface BotLookupIn extends BotAuth { phone: string; idNumber: string }   // phone = the WhatsApp sender in E.164
++/** `none` and a phone/ID mismatch return the identical shape (no enumeration). */
++export interface BotLookupOut { kind: BotKind; standalone?: { firstName: string; rentMinor: number; remainingMinor: number; dueDate: string; payByDate: string; suggestedCreditMinor: number; frozen?: boolean; awaitingSetup?: boolean } }
++export interface BotQuoteIn extends BotAuth { phone: string; idNumber: string; creditMinor: number }
++export interface BotQuoteOut extends TenantQuoteOut {}
++export interface BotPayIn extends BotAuth { phone: string; idNumber: string; quoteId: string; payerPhone: string }
++export interface BotPayOut extends TenantPayOut {}
++/** A message that is only LMM#### or LMC#### is sent here, from ANY bot state. The sender's WhatsApp number must equal the tenant's phone on file. */
++export interface BotConfirmCodeIn extends BotAuth { phone: string; text: string }
++export interface BotConfirmCodeOut { result: "setup_confirmed" | "change_confirmed" | "change_cancelled" | "invalid" | "expired" | "locked" | "not_found"; summary?: string }
++export interface BotJoinInfoIn extends BotAuth { _?: never }
++export interface BotJoinInfoOut { supportPhones: string[]; text: string }
++
++// ------------------------------------------------------------------------------------------------------------- callable map
++export interface LmmxCallableMap {
++  lmmx_desk_checkRecipient: { in: DeskCheckRecipientIn; out: DeskCheckRecipientOut };
++  lmmx_desk_createTenant: { in: DeskCreateTenantIn; out: DeskCreateTenantOut };
++  lmmx_desk_setupStatus: { in: DeskSetupStatusIn; out: DeskSetupStatusOut };
++  lmmx_desk_confirmSetup: { in: DeskConfirmSetupIn; out: DeskConfirmSetupOut };
++  lmmx_desk_resendOtp: { in: DeskResendOtpIn; out: DeskResendOtpOut };
++  lmmx_desk_listTenants: { in: DeskListTenantsIn; out: DeskListTenantsOut };
++  lmmx_desk_getTenant: { in: DeskGetTenantIn; out: DeskGetTenantOut };
++  lmmx_desk_requestChange: { in: DeskRequestChangeIn; out: DeskRequestChangeOut };
++  lmmx_desk_confirmChange: { in: DeskConfirmChangeIn; out: DeskConfirmChangeOut };
++  lmmx_desk_cancelChange: { in: DeskCancelChangeIn; out: DeskCancelChangeOut };
++  lmmx_desk_earnings: { in: DeskEarningsIn; out: DeskEarningsOut };
++  lmmx_desk_preview: { in: DeskPreviewIn; out: DeskPreviewOut };
++  lmmx_desk_pipeline: { in: DeskPipelineIn; out: DeskPipelineOut };
++  lmmx_top_reviewQueue: { in: Record<string, never>; out: TopReviewQueueOut };
++  lmmx_top_reviewDecision: { in: TopReviewDecisionIn; out: { ok: boolean } };
++  lmmx_top_freeze: { in: TopFreezeIn; out: { ok: boolean } };
++  lmmx_top_unfreeze: { in: TopUnfreezeIn; out: { ok: boolean } };
++  lmmx_top_reassign: { in: TopReassignIn; out: { ok: boolean } };
++  lmmx_top_reveal: { in: TopRevealIn; out: TopRevealOut };
++  lmmx_top_updateTenant: { in: TopUpdateTenantIn; out: { ok: boolean } };
++  lmmx_top_auditList: { in: TopAuditListIn; out: TopAuditListOut };
++  lmmx_top_auditVerify: { in: TopAuditVerifyIn; out: TopAuditVerifyOut };
++  lmmx_top_leadsList: { in: TopLeadsListIn; out: TopLeadsListOut };
++  lmmx_top_leadGet: { in: TopLeadGetIn; out: TopLeadGetOut };
++  lmmx_top_leadUpdate: { in: TopLeadUpdateIn; out: { ok: boolean } };
++  lmmx_top_stats: { in: Record<string, never>; out: TopStatsOut };
++  lmmx_tenant_link: { in: TenantLinkIn; out: TenantLinkOut };
++  lmmx_tenant_summary: { in: Record<string, never>; out: TenantSummaryOut };
++  lmmx_tenant_history: { in: TenantHistoryIn; out: TenantHistoryOut };
++  lmmx_tenant_quote: { in: TenantQuoteIn; out: TenantQuoteOut };
++  lmmx_tenant_pay: { in: TenantPayIn; out: TenantPayOut };
++  lmmx_tenant_setDueDay: { in: TenantSetDueDayIn; out: TenantSetDueDayOut };
++  lmmx_tenant_setPlan: { in: TenantSetPlanIn; out: { ok: boolean } };
++  lmmx_tenant_confirmSetup: { in: TenantConfirmSetupIn; out: { status: "active" } };
++  lmmx_tenant_confirmChange: { in: TenantConfirmChangeIn; out: DeskConfirmChangeOut };
++  lmmx_tenant_cancelChange: { in: TenantCancelChangeIn; out: { ok: boolean } };
++  lmmx_bot_lookup: { in: BotLookupIn; out: BotLookupOut };
++  lmmx_bot_quote: { in: BotQuoteIn; out: BotQuoteOut };
++  lmmx_bot_pay: { in: BotPayIn; out: BotPayOut };
++  lmmx_bot_confirmCode: { in: BotConfirmCodeIn; out: BotConfirmCodeOut };
++  lmmx_bot_joinInfo: { in: BotJoinInfoIn; out: BotJoinInfoOut };
++}
++export type LmmxCallableName = keyof LmmxCallableMap;
++export const LMMX_DESK_CALLABLES = ["lmmx_desk_checkRecipient", "lmmx_desk_createTenant", "lmmx_desk_setupStatus", "lmmx_desk_confirmSetup", "lmmx_desk_resendOtp", "lmmx_desk_listTenants", "lmmx_desk_getTenant", "lmmx_desk_requestChange", "lmmx_desk_confirmChange", "lmmx_desk_cancelChange", "lmmx_desk_earnings", "lmmx_desk_preview", "lmmx_desk_pipeline"] as const;
++export const LMMX_TOP_CALLABLES = ["lmmx_top_reviewQueue", "lmmx_top_reviewDecision", "lmmx_top_freeze", "lmmx_top_unfreeze", "lmmx_top_reassign", "lmmx_top_reveal", "lmmx_top_updateTenant", "lmmx_top_auditList", "lmmx_top_auditVerify", "lmmx_top_leadsList", "lmmx_top_leadGet", "lmmx_top_leadUpdate", "lmmx_top_stats"] as const;
++export const LMMX_TENANT_CALLABLES = ["lmmx_tenant_link", "lmmx_tenant_summary", "lmmx_tenant_history", "lmmx_tenant_quote", "lmmx_tenant_pay", "lmmx_tenant_setDueDay", "lmmx_tenant_setPlan", "lmmx_tenant_confirmSetup", "lmmx_tenant_confirmChange", "lmmx_tenant_cancelChange"] as const;
++export const LMMX_BOT_CALLABLES = ["lmmx_bot_lookup", "lmmx_bot_quote", "lmmx_bot_pay", "lmmx_bot_confirmCode", "lmmx_bot_joinInfo"] as const;
+diff --git a/functions/src/webhooks/whatsapp-webhook.ts b/functions/src/webhooks/whatsapp-webhook.ts
+index 3ef9390..cc62574 100644
+--- a/functions/src/webhooks/whatsapp-webhook.ts
++++ b/functions/src/webhooks/whatsapp-webhook.ts
+@@ -48,6 +48,18 @@ import {
+ } from '../handlers/rent.handler';
+ import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../handlers/watch.entry';
+ import { handleHouseToRent } from '../handlers/house.handler';
++import {
++  handleLmmxAmount,
++  handleLmmxConfirm,
++  handleLmmxDone,
++  handleLmmxHome,
++  handleLmmxId,
++  handleLmmxJoin,
++  handleLmmxNotFound,
++  handleLmmxPhone,
++  lmmxCodeReply,
++} from '../handlers/lmmx.handler';
++import { parseLmmxCode } from '../types/lmmx.contract';
+ import { isWatchState } from '../handlers/watch.handler';
+ import { claimMessage } from '../services/message-dedup.service';
+ import { logger } from '../utils/logger';
+@@ -142,6 +154,14 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+     });
+     logger.setContext({ phone, state: session.currentState });
+ 
++    // Lipa Mdogo Mdogo codes (LMM#### to confirm a sign-up or change, LMC#### to cancel a change) are understood from
++    // EVERY state, the language screen and idle included, and never move the user: the reply is sent and the session
++    // is left exactly as it was. Only the typed text can be a code (a button or row id never parses as one).
++    if (parseLmmxCode(message.text?.body)) {
++      await sendReply(phone, await lmmxCodeReply(phone, message.text?.body ?? '', session.language), session.currentState);
++      return;
++    }
++
+     // A tap on a button or list row of the shared UI is the same as typing its value (see utils/ui.ts). A tap on a
+     // screen the user has already left is answered with a notice and never acted on.
+     const tap = resolveTap(interactiveId, session.currentState);
+@@ -237,6 +257,31 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+         response = await handleLmmConfirm(phone, input, session);
+         break;
+ 
++      case STATE.LMMX_ID:
++        response = await handleLmmxId(phone, input, session);
++        break;
++      case STATE.LMMX_NOTFOUND:
++        response = await handleLmmxNotFound(phone, input, session);
++        break;
++      case STATE.LMMX_HOME:
++        response = await handleLmmxHome(phone, input, session);
++        break;
++      case STATE.LMMX_AMOUNT:
++        response = await handleLmmxAmount(phone, input, session);
++        break;
++      case STATE.LMMX_PHONE:
++        response = await handleLmmxPhone(phone, input, session);
++        break;
++      case STATE.LMMX_CONFIRM:
++        response = await handleLmmxConfirm(phone, input, session);
++        break;
++      case STATE.LMMX_DONE:
++        response = await handleLmmxDone(phone, input, session);
++        break;
++      case STATE.LMMX_JOIN:
++        response = await handleLmmxJoin(phone, input, session);
++        break;
++
+       case STATE.GET_INVOICE_WAITING_ID:
+         logger.info('Routing to get invoice handler');
+         response = await handleGetInvoice(phone, input, session);

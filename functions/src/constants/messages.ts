@@ -110,15 +110,15 @@ export const MESSAGES = {
     sw: '*Mpangaji amepatikana* 🎯\n\n👤 Jina: {name}\n💰 Kiasi kinachodaiwa: {outstanding}\n📅 Mwezi wa bili: {billing}\n\nUngependa kuendelea kulipa ankara hii?',
   },
 
-  // Lipa Mos Mos: pay rent a little at a time
+  // Lipa Mdogo Mdogo: pay rent a little at a time
   LMM_INTRO: {
-    en: '*Lipa Mos Mos* 🪙\n\nPay your rent a little at a time. You owe {due}. Your landlord is paid when it is fully covered, or on {settles}. A small fee (2.5%, or 5% on payments under KES 100) is added to each payment.\n\nHow often would you like to pay?',
-    sw: '*Lipa Mos Mos* 🪙\n\nLipa kodi yako kidogo kidogo. Unadaiwa {due}. Mwenye nyumba analipwa kodi ikikamilika, au tarehe {settles}. Ada ndogo (2.5%, au 5% kwa malipo chini ya KES 100) huongezwa kwa kila malipo.\n\nUngependa kulipa mara ngapi?',
+    en: '*Lipa Mdogo Mdogo* 🪙\n\nPay your rent a little at a time. You owe {due}. Your landlord is paid when it is fully covered, or on {settles}. A small fee (2.5%, or 5% on payments under KES 100) is added to each payment.\n\nHow often would you like to pay?',
+    sw: '*Lipa Mdogo Mdogo* 🪙\n\nLipa kodi yako kidogo kidogo. Unadaiwa {due}. Mwenye nyumba analipwa kodi ikikamilika, au tarehe {settles}. Ada ndogo (2.5%, au 5% kwa malipo chini ya KES 100) huongezwa kwa kila malipo.\n\nUngependa kulipa mara ngapi?',
   },
 
   LMM_STATUS: {
-    en: '*Lipa Mos Mos* 🪙\n\n💰 Paid: {paid} of {due}\n📊 Progress: {pct}%\n⚖️ Balance: {balance}\n📅 Landlord is paid by: {settles}\n🔁 Plan: {freq}',
-    sw: '*Lipa Mos Mos* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
+    en: '*Lipa Mdogo Mdogo* 🪙\n\n💰 Paid: {paid} of {due}\n📊 Progress: {pct}%\n⚖️ Balance: {balance}\n📅 Landlord is paid by: {settles}\n🔁 Plan: {freq}',
+    sw: '*Lipa Mdogo Mdogo* 🪙\n\n💰 Umelipa: {paid} kati ya {due}\n📊 Maendeleo: {pct}%\n⚖️ Salio: {balance}\n📅 Mwenye nyumba analipwa kufikia: {settles}\n🔁 Mpango: {freq}',
   },
 
   // Shown under the status while the plan holds under KES 300: what a payout will cost, or that it is too small to send. Amounts come from PAY.
@@ -153,8 +153,8 @@ export const MESSAGES = {
   },
 
   LMM_UNAVAILABLE: {
-    en: '*Lipa Mos Mos* is not available right now.\n\n{reason}',
-    sw: '*Lipa Mos Mos* haipatikani kwa sasa.\n\n{reason}',
+    en: '*Lipa Mdogo Mdogo* is not available right now.\n\n{reason}',
+    sw: '*Lipa Mdogo Mdogo* haipatikani kwa sasa.\n\n{reason}',
   },
 
   LMM_ERROR: {
