@@ -11,6 +11,7 @@ import { OtpInput } from "./OtpInput";
 import { errorMessage, isTransientError } from "./errors";
 import { PRODUCT_LABEL, SCOPE_HELP, SCOPE_LABEL, scopesForProduct, splitEntityKey } from "./scopes";
 import { clearStoredSession, setStoredSession } from "./sessionStore";
+import { openedSession } from "./topSession";
 import type { StoredSession } from "./sessionStore";
 import { formatClock } from "./time";
 import { useActiveSessionDetail, useNow } from "./useActiveSession";
@@ -152,6 +153,13 @@ function OpenSession({ agent }: { agent: AgentView }) {
     setRequestBusy(true); setRequestError(null);
     try {
       const out = await deskApi.requestAccess({ entityKey: e.entityKey, scopes: chosen });
+      const open = openedSession(out, e, chosen);
+      if (open) {
+        // The top desk (COG-0000) needs no customer code: the server opened the session already.
+        if (previous) void deskApi.endSession({ sessionId: previous.sessionId }).catch(() => undefined);
+        setStoredSession(open);
+        return;
+      }
       setPending({ sessionId: out.sessionId, otpSentTo: out.otpSentTo, sentAt: Date.now(), scopes: chosen });
       if (previous) void deskApi.endSession({ sessionId: previous.sessionId }).catch(() => undefined);
     } catch (err) {

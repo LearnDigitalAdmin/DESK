@@ -1,0 +1,433 @@
+diff --git a/functions-desk/src/contract.ts b/functions-desk/src/contract.ts
+index ffc687f..f9332fa 100644
+--- a/functions-desk/src/contract.ts
++++ b/functions-desk/src/contract.ts
+@@ -74,12 +74,14 @@ export interface ResolveEntityOut {
+ }
+ 
+ export interface RequestAccessIn { entityKey: EntityKey; scopes: Scope[] }
+-export interface RequestAccessOut { sessionId: string; otpSentTo: string }
++/** `verified: true` (with `expiresAt`) means the session is already open and NO customer code is needed: that is only ever returned to the top desk (COG-0000). */
++export interface RequestAccessOut { sessionId: string; otpSentTo: string; verified?: boolean; expiresAt?: number }
+ export interface VerifyAccessIn { sessionId: string; otp: string }
+ export interface VerifyAccessOut { expiresAt: number }
+ 
+ export interface RequestActionOtpIn { sessionId: string; action: OtpAction; summary: string }
+-export interface RequestActionOtpOut { actionId: string }
++/** `verified: true` means this action id is already confirmed and NO customer code is needed: only ever returned to the top desk (COG-0000). */
++export interface RequestActionOtpOut { actionId: string; verified?: boolean }
+ export interface VerifyActionOtpIn { actionId: string; otp: string }
+ export interface VerifyActionOtpOut { ok: boolean }
+ 
+diff --git a/functions-desk/src/otp/handlers.ts b/functions-desk/src/otp/handlers.ts
+index 8eda006..dfa01cf 100644
+--- a/functions-desk/src/otp/handlers.ts
++++ b/functions-desk/src/otp/handlers.ts
+@@ -16,6 +16,7 @@ import {
+   entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, takeRates, wrongCodeMessage,
+ } from "./core.js";
+ import { ACTION_SCOPE, actionSmsText, checkActionSummary } from "./messages.js";
++import { isTopDeskAgent, topActionOtpDoc } from "../sessions/pure.js";
+ 
+ function parseAction(v: unknown): OtpAction {
+   if (typeof v !== "string" || !OTP_ACTIONS.has(v as OtpAction)) throw new DeskError("invalid_argument", "Unknown action");
+@@ -38,6 +39,14 @@ export async function requestActionOtp(deps: Deps, uid: string, raw: unknown): P
+     throw new DeskError("failed_precondition", "Rent STK is only available for Plot Yangu accounts");
+   }
+ 
++  // COG-0000 needs no customer code: the confirmation is created already verified (nothing is sent to the customer).
++  if (isTopDeskAgent(agent)) {
++    const tref = col("actionOtps").doc();
++    await tref.create(topActionOtpDoc({ actionId: tref.id, sessionId, agentId: uid, action, summary, now: deps.now() }));
++    await audit({ action: "action_otp_verified", agentId: uid, entityKey: ctx.entityKey, sessionId, meta: { otpAction: action, actionId: tref.id, topNoOtp: true } });
++    return { actionId: tref.id, verified: true };
++  }
++
+   // Re-check with the product now: the customer may have removed this desk since the session opened.
+   const { code } = assertEntityKey(ctx.entityKey);
+   const cfg = await deps.getConfig();
+diff --git a/functions-desk/src/sessions/access.ts b/functions-desk/src/sessions/access.ts
+index 99ff77e..e1da098 100644
+--- a/functions-desk/src/sessions/access.ts
++++ b/functions-desk/src/sessions/access.ts
+@@ -18,7 +18,7 @@ import {
+   accessHourRule, entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, SESSION_TTL_MS, takeRates, wrongCodeMessage,
+ } from "../otp/core.js";
+ import { accessSmsText } from "../otp/messages.js";
+-import { validateScopes } from "./pure.js";
++import { isTopDeskAgent, topSessionDoc, validateScopes } from "./pure.js";
+ 
+ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Promise<RequestAccessOut> {
+   const d = record(raw);
+@@ -34,7 +34,8 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
+     throw new DeskError("permission_denied", "You cannot open a session on an account you administer yourself");
+   }
+ 
+-  const taken = await takeRates([accessHourRule(uid, entity.entityKey), entityDailyRule(entity.entityKey)], deps.now());
++  const top = isTopDeskAgent(agent);   // COG-0000 needs no customer code: no SMS is sent, so no rate allowance is used either
++  const taken = top ? undefined : await takeRates([accessHourRule(uid, entity.entityKey), entityDailyRule(entity.entityKey)], deps.now());
+ 
+   // Older unverified codes for this desk and customer stop being usable.
+   const stale = await col("sessions").where("agentId", "==", uid).where("entityKey", "==", entity.entityKey).where("status", "==", "pending").get();
+@@ -44,6 +45,14 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
+     await batch.commit();
+   }
+ 
++  if (top) {
++    const tref = col("sessions").doc();
++    const tdoc = topSessionDoc({ sessionId: tref.id, agentId: uid, entityKey: entity.entityKey, scopes, now: deps.now() });
++    await tref.create(tdoc);
++    await audit({ action: "access_requested", agentId: uid, entityKey: entity.entityKey, sessionId: tref.id, meta: { scopes, topNoOtp: true } });
++    await audit({ action: "access_verified", agentId: uid, entityKey: entity.entityKey, sessionId: tref.id, meta: { claimed: false, topNoOtp: true } });
++    return { sessionId: tref.id, otpSentTo: "", verified: true, expiresAt: tdoc.expiresAt };
++  }
+   const ref = col("sessions").doc();
+   const otp = deps.randomOtp();
+   const now = deps.now();
+@@ -56,7 +65,7 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
+     await deps.sendSms(adminPhone, accessSmsText(agent.name, agent.agentCode, lookup.info.displayName, otp));
+   } catch {
+     await ref.delete().catch(() => undefined);
+-    await taken.release();
++    await taken?.release();
+     throw new DeskError("internal", "We could not send the access code to the customer. Please try again.");
+   }
+   await audit({ action: "access_requested", agentId: uid, entityKey: entity.entityKey, sessionId: ref.id, meta: { scopes } });
+diff --git a/functions-desk/src/sessions/pure.test.ts b/functions-desk/src/sessions/pure.test.ts
+index af0bef6..39d7e25 100644
+--- a/functions-desk/src/sessions/pure.test.ts
++++ b/functions-desk/src/sessions/pure.test.ts
+@@ -17,3 +17,32 @@ test("tenant ids: 1–max, trimmed, unique", () => {
+   assert.throws(() => validateTenantIds(Array.from({ length: 201 }, (_, i) => `t${i}`), 200));
+   assert.equal(validateTenantIds(Array.from({ length: 200 }, (_, i) => `t${i}`), 200).length, 200);
+ });
++
++// ---- COG-0000 needs no customer OTP (and nobody else gets that)
++import { isTopDeskAgent, topActionOtpDoc, topSessionDoc } from "./pure.js";
++import { evaluateActionOtp, evaluateSession } from "../kernel/session.js";
++
++test("only the active COG-0000 agent is the top desk", () => {
++  assert.equal(isTopDeskAgent({ agentCode: "COG-0000", status: "active" }), true);
++  assert.equal(isTopDeskAgent({ agentCode: "COG-0000", status: "suspended" }), false);
++  assert.equal(isTopDeskAgent({ agentCode: "COG-0012", status: "active" }), false);
++  assert.equal(isTopDeskAgent({ agentCode: "cog-0000", status: "active" }), false);
++  assert.equal(isTopDeskAgent(undefined), false);
++});
++test("a top-desk session is open from the start and passes the normal session checks", () => {
++  const NOW = 1_700_000_000_000;
++  const s = topSessionDoc({ sessionId: "s1", agentId: "u1", entityKey: "chama:SMC-0001", scopes: ["read", "bulk_sms"], now: NOW });
++  assert.equal(s.status, "active"); assert.ok(s.otpVerifiedAt); assert.equal(s.otpHash, undefined);
++  assert.equal(evaluateSession(s, { uid: "u1", scope: "bulk_sms" }, NOW + 1000).ok, true);
++  assert.equal(evaluateSession(s, { uid: "u2", scope: "read" }, NOW + 1000).ok, false, "still bound to that agent");
++  assert.equal(evaluateSession(s, { uid: "u1", scope: "export" }, NOW + 1000).ok, false, "still limited to the scopes asked for");
++  assert.equal(evaluateSession(s, { uid: "u1", scope: "read" }, s.expiresAt).ok, false, "still expires");
++});
++test("a top-desk action confirmation is already verified, single-action and short-lived like any other", () => {
++  const NOW = 1_700_000_000_000;
++  const a = topActionOtpDoc({ actionId: "a1", sessionId: "s1", agentId: "u1", action: "export", summary: "x", now: NOW });
++  assert.equal(evaluateActionOtp(a, { sessionId: "s1", uid: "u1", action: "export" }, NOW + 1000).ok, true);
++  assert.equal(evaluateActionOtp(a, { sessionId: "s1", uid: "u1", action: "bulk_sms" }, NOW + 1000).ok, false, "not valid for another action");
++  assert.equal(evaluateActionOtp(a, { sessionId: "s1", uid: "u1", action: "export" }, NOW + 6 * 60_000).ok, false, "not valid after 5 minutes");
++  assert.equal(evaluateActionOtp({ ...a, consumedAt: NOW + 10 }, { sessionId: "s1", uid: "u1", action: "export" }, NOW + 1000).ok, false, "single use");
++});
+diff --git a/functions-desk/src/sessions/pure.ts b/functions-desk/src/sessions/pure.ts
+index 610d08e..d88ba45 100644
+--- a/functions-desk/src/sessions/pure.ts
++++ b/functions-desk/src/sessions/pure.ts
+@@ -8,6 +8,23 @@ const SCOPE_SET: Record<Scope, true> = {
+ export const ALL_SCOPES = Object.keys(SCOPE_SET) as Scope[];
+ 
+ /** A non-empty subset of Scope, deduplicated, in contract order. Pure. */
++import { DESK_TOP_CODE, type OtpAction, type EntityKey, type Scope as ScopeT } from "../contract.js";
++import { SESSION_TTL_MS } from "../otp/core.js";
++import type { ActionOtpDoc, SessionDoc } from "../types.js";
++
++/** The top desk (COG-0000) is the Samuhia internal support desk: it needs no customer OTP to open an account or confirm an action. Everyone else always does. */
++export function isTopDeskAgent(a: { agentCode?: string; status?: string } | undefined): boolean {
++  return !!a && a.agentCode === DESK_TOP_CODE && a.status === "active";
++}
++/** A session that is open from the start (no code was sent, so there is nothing to verify). */
++export function topSessionDoc(p: { sessionId: string; agentId: string; entityKey: EntityKey; scopes: ScopeT[]; now: number }): SessionDoc {
++  return { sessionId: p.sessionId, agentId: p.agentId, entityKey: p.entityKey, scopes: p.scopes, status: "active", otpAttempts: 0, otpExpiresAt: p.now, otpVerifiedAt: p.now, expiresAt: p.now + SESSION_TTL_MS, createdAt: p.now };
++}
++/** An action confirmation that is already verified (single use, fresh for ACTION_OTP_FRESH_MS like any other). */
++export function topActionOtpDoc(p: { actionId: string; sessionId: string; agentId: string; action: OtpAction; summary: string; now: number }): ActionOtpDoc {
++  return { actionId: p.actionId, sessionId: p.sessionId, agentId: p.agentId, action: p.action, summary: p.summary, otpHash: "", otpAttempts: 0, otpExpiresAt: p.now, verifiedAt: p.now, createdAt: p.now };
++}
++
+ export function validateScopes(v: unknown): Scope[] {
+   if (!Array.isArray(v) || v.length === 0) throw new DeskError("invalid_argument", "Choose at least one thing you need access to");
+   const wanted = new Set<string>();
+diff --git a/functions/src/types/lmmx.contract.ts b/functions/src/types/lmmx.contract.ts
+index 1cbf8b4..60c5029 100644
+--- a/functions/src/types/lmmx.contract.ts
++++ b/functions/src/types/lmmx.contract.ts
+@@ -12,7 +12,7 @@
+  * Dates are Africa/Nairobi calendar days "YYYY-MM-DD". User-facing brand: "Lipa Mdogo Mdogo". Internal names keep "lmm"/"lmmx".
+  */
+ 
+-export const LMMX_CONTRACT_VERSION = 1;
++export const LMMX_CONTRACT_VERSION = 2;
+ export const LMMX_REGION = "africa-south1";           // every lmmx_* callable
+ export const LMMX_BRAND = "Lipa Mdogo Mdogo";
+ export const LMMX_TOP_DESK = "COG-0000";
+@@ -295,7 +295,8 @@ export interface DeskCheckRecipientIn { channel: Channel; bankCode?: string; acc
+ /** Only the account number and booleans. Never another recipient's name, contact, tenants, desks or counts. */
+ export interface DeskCheckRecipientOut { exists: boolean; accountNumber: string; nameMatchesEntered: boolean; reusable: boolean; reuseToken?: string }
+ export interface DeskCreateTenantIn { profile: TenantProfileInput; rentMinor: number; dueDay?: number; frequency?: Frequency; recipient: RecipientInput; idempotencyKey: string }
+-export interface DeskCreateTenantOut { tenantId: string; status: "awaiting_confirmation" | "draft"; nameMatch: NameMatch; needsReview: boolean; expiresAt: number; resolvedNameMasked: string }
++/** COG-0000 needs no tenant code: a tenant it creates comes back "active" at once (no OTP is sent). Everyone else gets "awaiting_confirmation" (or "draft" while a recipient is under review). */
++export interface DeskCreateTenantOut { tenantId: string; status: "awaiting_confirmation" | "draft" | "active"; nameMatch: NameMatch; needsReview: boolean; expiresAt: number; resolvedNameMasked: string }
+ export interface DeskSetupStatusIn { tenantId: string }
+ /** What the desk screen shows: "Waiting for verification" (awaiting, with a countdown) or an OTP box; active when done. */
+ export interface DeskSetupStatusOut { tenantId: string; status: TenantStatus; otpExpiresAt?: number; attemptsLeft?: number; locked?: boolean; resendsLeft?: number; needsReview?: boolean }
+diff --git a/src/desk/access/AccessScreen.tsx b/src/desk/access/AccessScreen.tsx
+index 0ce78fd..e77dd96 100644
+--- a/src/desk/access/AccessScreen.tsx
++++ b/src/desk/access/AccessScreen.tsx
+@@ -11,6 +11,7 @@ import { OtpInput } from "./OtpInput";
+ import { errorMessage, isTransientError } from "./errors";
+ import { PRODUCT_LABEL, SCOPE_HELP, SCOPE_LABEL, scopesForProduct, splitEntityKey } from "./scopes";
+ import { clearStoredSession, setStoredSession } from "./sessionStore";
++import { openedSession } from "./topSession";
+ import type { StoredSession } from "./sessionStore";
+ import { formatClock } from "./time";
+ import { useActiveSessionDetail, useNow } from "./useActiveSession";
+@@ -152,6 +153,13 @@ function OpenSession({ agent }: { agent: AgentView }) {
+     setRequestBusy(true); setRequestError(null);
+     try {
+       const out = await deskApi.requestAccess({ entityKey: e.entityKey, scopes: chosen });
++      const open = openedSession(out, e, chosen);
++      if (open) {
++        // The top desk (COG-0000) needs no customer code: the server opened the session already.
++        if (previous) void deskApi.endSession({ sessionId: previous.sessionId }).catch(() => undefined);
++        setStoredSession(open);
++        return;
++      }
+       setPending({ sessionId: out.sessionId, otpSentTo: out.otpSentTo, sentAt: Date.now(), scopes: chosen });
+       if (previous) void deskApi.endSession({ sessionId: previous.sessionId }).catch(() => undefined);
+     } catch (err) {
+diff --git a/src/desk/access/ActionOtpDialog.tsx b/src/desk/access/ActionOtpDialog.tsx
+index 4c41464..0e44839 100644
+--- a/src/desk/access/ActionOtpDialog.tsx
++++ b/src/desk/access/ActionOtpDialog.tsx
+@@ -1,8 +1,10 @@
+ import { useCallback, useEffect, useRef, useState } from "react";
+-import { deskApi } from "../api";
++import { DESK_TOP_CODE, deskApi } from "../api";
++import { useAgent } from "../core/useAgent";
+ import type { OtpAction } from "../api";
+ import { Modal, FormField, buttonClass } from "../ui";
+ import { OtpInput } from "./OtpInput";
++import { actionAlreadyConfirmed } from "./topSession";
+ import { errorMessage, isTransientError } from "./errors";
+ import { formatClock } from "./time";
+ import { useNow } from "./useActiveSession";
+@@ -27,14 +29,16 @@ export interface ActionOtpDialogProps {
+  * wasted share of the daily OTP allowance). Step 2: the customer reads the code out, the agent enters it.
+  */
+ export function ActionOtpDialog(props: ActionOtpDialogProps) {
++  // The top desk (COG-0000) needs no customer code: the server confirms for it, so the dialog confirms by itself.
++  const top = useAgent()?.agentCode === DESK_TOP_CODE;
+   return (
+-    <Modal open={props.open} title="Confirm with the customer" onClose={props.onClose}>
+-      {props.open ? <Body {...props} /> : null}
++    <Modal open={props.open} title={top ? "Confirm" : "Confirm with the customer"} onClose={props.onClose}>
++      {props.open ? <Body {...props} autoConfirm={top} /> : null}
+     </Modal>
+   );
+ }
+ 
+-function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDialogProps) {
++function Body({ sessionId, action, summary, onVerified, onClose, autoConfirm }: ActionOtpDialogProps & { autoConfirm: boolean }) {
+   const [actionId, setActionId] = useState<string | null>(null);
+   const [sentAt, setSentAt] = useState(0);
+   const [code, setCode] = useState("");
+@@ -54,6 +58,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
+     try {
+       const out = await deskApi.requestActionOtp({ sessionId, action, summary });
+       if (!alive.current) return;
++      if (actionAlreadyConfirmed(out)) { setActionId(out.actionId); setVerified(true); onVerified(out.actionId); return; }   // top desk: already confirmed, nothing was sent
+       setActionId(out.actionId); setSentAt(Date.now()); setCode(""); setAttempts(0);
+     } catch (e) {
+       if (alive.current) setError(errorMessage(e));
+@@ -61,7 +66,10 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
+       busyRef.current = false;
+       if (alive.current) setBusy(null);
+     }
+-  }, [sessionId, action, summary]);
++  }, [sessionId, action, summary, onVerified]);
++
++  const autoRan = useRef(false);
++  useEffect(() => { if (autoConfirm && !autoRan.current) { autoRan.current = true; void send(); } }, [autoConfirm, send]);
+ 
+   const verify = useCallback(async () => {
+     if (!actionId || busyRef.current || code.length !== 6) return;
+@@ -91,7 +99,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
+   return (
+     <div className="min-w-0 space-y-4">
+       <div className="min-w-0 rounded-xl bg-gray-50 p-3">
+-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">The customer will be asked to approve</p>
++        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{autoConfirm ? "You are confirming" : "The customer will be asked to approve"}</p>
+         <p className="mt-1 break-words text-sm font-semibold text-gray-900">{summary}</p>
+       </div>
+ 
+@@ -103,7 +111,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
+       ) : !sent ? (
+         <div className="min-w-0 space-y-3">
+           <p className="break-words text-sm text-gray-700">
+-            We will text a 6-digit code to the customer. They should only read it to you if they asked for this.
++            {autoConfirm && !error ? "Confirming for the top desk. No customer code is needed." : "We will text a 6-digit code to the customer. They should only read it to you if they asked for this."}
+           </p>
+           {error && <p role="alert" className="break-words text-sm text-red-600">{error}</p>}
+           <div className="flex min-w-0 flex-wrap gap-2">
+diff --git a/src/desk/access/topSession.ts b/src/desk/access/topSession.ts
+new file mode 100644
+index 0000000..5e56c66
+--- /dev/null
++++ b/src/desk/access/topSession.ts
+@@ -0,0 +1,12 @@
++import type { EntityKey, Scope } from "../api";
++
++/** The top desk (COG-0000) needs no customer code: the server returns a session that is already open. Everyone else gets `null` and goes through the code step. */
++export function openedSession(
++  out: { sessionId: string; verified?: boolean; expiresAt?: number },
++  entity: { entityKey: EntityKey; displayName: string },
++  scopes: Scope[],
++): { sessionId: string; entityKey: EntityKey; displayName: string; scopes: Scope[]; expiresAt: number } | null {
++  return out.verified === true && typeof out.expiresAt === "number" ? { sessionId: out.sessionId, entityKey: entity.entityKey, displayName: entity.displayName, scopes, expiresAt: out.expiresAt } : null;
++}
++/** An action confirmation the server already marked verified (top desk only): the dialog hands the id straight back. */
++export const actionAlreadyConfirmed = (out: { verified?: boolean }): boolean => out.verified === true;
+diff --git a/src/desk/api/contract.ts b/src/desk/api/contract.ts
+index cdde467..0c60eaa 100644
+--- a/src/desk/api/contract.ts
++++ b/src/desk/api/contract.ts
+@@ -75,12 +75,14 @@ export interface ResolveEntityOut {
+ }
+ 
+ export interface RequestAccessIn { entityKey: EntityKey; scopes: Scope[] }
+-export interface RequestAccessOut { sessionId: string; otpSentTo: string }
++/** `verified: true` (with `expiresAt`) means the session is already open and NO customer code is needed: that is only ever returned to the top desk (COG-0000). */
++export interface RequestAccessOut { sessionId: string; otpSentTo: string; verified?: boolean; expiresAt?: number }
+ export interface VerifyAccessIn { sessionId: string; otp: string }
+ export interface VerifyAccessOut { expiresAt: number }
+ 
+ export interface RequestActionOtpIn { sessionId: string; action: OtpAction; summary: string }
+-export interface RequestActionOtpOut { actionId: string }
++/** `verified: true` means this action id is already confirmed and NO customer code is needed: only ever returned to the top desk (COG-0000). */
++export interface RequestActionOtpOut { actionId: string; verified?: boolean }
+ export interface VerifyActionOtpIn { actionId: string; otp: string }
+ export interface VerifyActionOtpOut { ok: boolean }
+ 
+diff --git a/src/desk/api/lmmxContract.ts b/src/desk/api/lmmxContract.ts
+index 1cbf8b4..60c5029 100644
+--- a/src/desk/api/lmmxContract.ts
++++ b/src/desk/api/lmmxContract.ts
+@@ -12,7 +12,7 @@
+  * Dates are Africa/Nairobi calendar days "YYYY-MM-DD". User-facing brand: "Lipa Mdogo Mdogo". Internal names keep "lmm"/"lmmx".
+  */
+ 
+-export const LMMX_CONTRACT_VERSION = 1;
++export const LMMX_CONTRACT_VERSION = 2;
+ export const LMMX_REGION = "africa-south1";           // every lmmx_* callable
+ export const LMMX_BRAND = "Lipa Mdogo Mdogo";
+ export const LMMX_TOP_DESK = "COG-0000";
+@@ -295,7 +295,8 @@ export interface DeskCheckRecipientIn { channel: Channel; bankCode?: string; acc
+ /** Only the account number and booleans. Never another recipient's name, contact, tenants, desks or counts. */
+ export interface DeskCheckRecipientOut { exists: boolean; accountNumber: string; nameMatchesEntered: boolean; reusable: boolean; reuseToken?: string }
+ export interface DeskCreateTenantIn { profile: TenantProfileInput; rentMinor: number; dueDay?: number; frequency?: Frequency; recipient: RecipientInput; idempotencyKey: string }
+-export interface DeskCreateTenantOut { tenantId: string; status: "awaiting_confirmation" | "draft"; nameMatch: NameMatch; needsReview: boolean; expiresAt: number; resolvedNameMasked: string }
++/** COG-0000 needs no tenant code: a tenant it creates comes back "active" at once (no OTP is sent). Everyone else gets "awaiting_confirmation" (or "draft" while a recipient is under review). */
++export interface DeskCreateTenantOut { tenantId: string; status: "awaiting_confirmation" | "draft" | "active"; nameMatch: NameMatch; needsReview: boolean; expiresAt: number; resolvedNameMasked: string }
+ export interface DeskSetupStatusIn { tenantId: string }
+ /** What the desk screen shows: "Waiting for verification" (awaiting, with a countdown) or an OTP box; active when done. */
+ export interface DeskSetupStatusOut { tenantId: string; status: TenantStatus; otpExpiresAt?: number; attemptsLeft?: number; locked?: boolean; resendsLeft?: number; needsReview?: boolean }
+diff --git a/src/desk/modules/lmm/AddTenantWizard.tsx b/src/desk/modules/lmm/AddTenantWizard.tsx
+index 83f1091..73644b3 100644
+--- a/src/desk/modules/lmm/AddTenantWizard.tsx
++++ b/src/desk/modules/lmm/AddTenantWizard.tsx
+@@ -55,6 +55,7 @@ export default function AddTenantWizard() {
+       try {
+         const out = await lmmx.createTenant({ profile: toProfileInput(tenant), rentMinor, dueDay, frequency: rent.frequency, recipient: toRecipientInput(rec, check.reuseToken), idempotencyKey: idem.key });
+         if (out.needsReview || out.status === "draft") setReview(true);
++        else if (out.status === "active") nav(`${LMM_BASE}/tenant/${out.tenantId}`, { replace: true, state: { justActivated: true } });   // top desk: no code needed
+         else nav(`${LMM_BASE}/waiting/${out.tenantId}`, { replace: true });
+       } catch (err) { setError({ text: errorText(err), notReady: lmmxCodeOf(err) === "LMMX_E_DESK_NOT_READY" }); }
+     });
+diff --git a/src/desk/modules/lmm/ChangeFlow.tsx b/src/desk/modules/lmm/ChangeFlow.tsx
+index 79f4efa..779a6b0 100644
+--- a/src/desk/modules/lmm/ChangeFlow.tsx
++++ b/src/desk/modules/lmm/ChangeFlow.tsx
+@@ -1,5 +1,7 @@
+ import { useEffect, useRef, useState } from "react";
+ import { Link } from "react-router-dom";
++import { DESK_TOP_CODE } from "../../api";
++import { useAgent } from "../../core/useAgent";
+ import { Card, FormField, buttonClass, inputClass } from "../../ui";
+ import type { ChangeKind, DeskGetTenantOut, PendingChangeView } from "../../api/lmmxContract.ts";
+ import { kes } from "../../api/lmmxContract.ts";
+@@ -83,7 +85,8 @@ export default function ChangeFlow({ tenant, kind, resume, onClose, onChanged }:
+     });
+   }
+ 
+-  const copy = kind === "recipient" ? S.change.payoutCopy : S.change.rentCopy;
++  const top = useAgent()?.agentCode === DESK_TOP_CODE;   // COG-0000: no tenant code, no cooling-off
++  const copy = top ? S.change.topCopy : kind === "recipient" ? S.change.payoutCopy : S.change.rentCopy;
+   const title = kind === "recipient" ? S.change.payoutTitle : S.change.rentTitle;
+ 
+   if (stage === "form") {
+@@ -105,7 +108,7 @@ export default function ChangeFlow({ tenant, kind, resume, onClose, onChanged }:
+           {check.dedupe.state !== "ask" && (
+             <div className="flex flex-wrap gap-2">
+               <button type="button" className={buttonClass.secondary} onClick={onClose} disabled={submit.busy}>{S.common.cancel}</button>
+-              <button type="button" className={buttonClass.primary} disabled={submit.busy || check.checking} onClick={() => void request()}>{submit.busy || check.checking ? S.change.sending : S.change.send}</button>
++              <button type="button" className={buttonClass.primary} disabled={submit.busy || check.checking} onClick={() => void request()}>{submit.busy || check.checking ? (top ? S.change.topSending : S.change.sending) : (top ? S.change.topSend : S.change.send)}</button>
+             </div>
+           )}
+         </div>
+diff --git a/src/desk/modules/lmm/strings.ts b/src/desk/modules/lmm/strings.ts
+index 17d3565..ec023ca 100644
+--- a/src/desk/modules/lmm/strings.ts
++++ b/src/desk/modules/lmm/strings.ts
+@@ -77,6 +77,8 @@ export const S = {
+       "If the due date is near, the change starts after this month's payout.",
+     ],
+     rentCopy: ["The tenant gets a code by SMS and must confirm it.", "Double-check the new rent with the tenant."],
++    topCopy: ["As the top desk this change applies at once. No tenant code and no waiting period.", "The tenant and the landlords are told by SMS, and it is saved in the audit log.", "Double-check the details with the tenant before you send."],
++    topSend: "Apply now", topSending: "Applying…",
+     newRent: "New monthly rent (KES)", send: "Send code to the tenant", sending: "Sending…", doneTitle: "Change confirmed",
+     codeTitle: "Waiting for the tenant to confirm", cancelled: "Change cancelled.",
+     appliedBody: "The new rent is set.", coolingBody: "The tenant confirmed. The new account starts after 48 hours.", deferredBody: "The tenant confirmed. It starts after this month's payout to the landlord.",
+diff --git a/tests/desk-ui/top-no-otp.test.ts b/tests/desk-ui/top-no-otp.test.ts
+new file mode 100644
+index 0000000..144fbf4
+--- /dev/null
++++ b/tests/desk-ui/top-no-otp.test.ts
+@@ -0,0 +1,26 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { actionAlreadyConfirmed, openedSession } from "../../src/desk/access/topSession";
++import { S } from "../../src/desk/modules/lmm/strings";
++import { LMMX_CONTRACT_VERSION } from "../../src/desk/api/lmmxContract";
++import { readFileSync } from "node:fs";
++
++const entity = { entityKey: "chama:SMC-0001" as never, displayName: "Test Chama" };
++test("a session the server already opened (top desk) goes straight in", () => {
++  const s = openedSession({ sessionId: "s1", verified: true, expiresAt: 123 }, entity, ["read"]);
++  assert.deepEqual(s, { sessionId: "s1", entityKey: "chama:SMC-0001", displayName: "Test Chama", scopes: ["read"], expiresAt: 123 });
++});
++test("everyone else still goes through the customer code step", () => {
++  assert.equal(openedSession({ sessionId: "s1" }, entity, ["read"]), null);
++  assert.equal(openedSession({ sessionId: "s1", verified: false, expiresAt: 123 }, entity, ["read"]), null);
++  assert.equal(openedSession({ sessionId: "s1", verified: true }, entity, ["read"]), null, "no expiry, no session");
++  assert.equal(actionAlreadyConfirmed({}), false); assert.equal(actionAlreadyConfirmed({ verified: false }), false); assert.equal(actionAlreadyConfirmed({ verified: true }), true);
++});
++test("the top-desk change copy says no code and no waiting; the regular copy still says code and 48 hours", () => {
++  assert.match(S.change.topCopy.join(" "), /No tenant code and no waiting period/);
++  assert.match(S.change.payoutCopy.join(" "), /code/); assert.match(S.change.payoutCopy.join(" "), /48 hours/);
++});
++test("the two DESK copies of the LMMX contract are identical and are version 2", () => {
++  assert.equal(LMMX_CONTRACT_VERSION, 2);
++  assert.equal(readFileSync("src/desk/api/lmmxContract.ts", "utf8"), readFileSync("functions/src/types/lmmx.contract.ts", "utf8"));
++});

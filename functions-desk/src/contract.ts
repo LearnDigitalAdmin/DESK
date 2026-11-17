@@ -74,12 +74,14 @@ export interface ResolveEntityOut {
 }
 
 export interface RequestAccessIn { entityKey: EntityKey; scopes: Scope[] }
-export interface RequestAccessOut { sessionId: string; otpSentTo: string }
+/** `verified: true` (with `expiresAt`) means the session is already open and NO customer code is needed: that is only ever returned to the top desk (COG-0000). */
+export interface RequestAccessOut { sessionId: string; otpSentTo: string; verified?: boolean; expiresAt?: number }
 export interface VerifyAccessIn { sessionId: string; otp: string }
 export interface VerifyAccessOut { expiresAt: number }
 
 export interface RequestActionOtpIn { sessionId: string; action: OtpAction; summary: string }
-export interface RequestActionOtpOut { actionId: string }
+/** `verified: true` means this action id is already confirmed and NO customer code is needed: only ever returned to the top desk (COG-0000). */
+export interface RequestActionOtpOut { actionId: string; verified?: boolean }
 export interface VerifyActionOtpIn { actionId: string; otp: string }
 export interface VerifyActionOtpOut { ok: boolean }
 

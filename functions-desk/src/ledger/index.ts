@@ -27,7 +27,7 @@ export const desk_onCyberTransaction = onDocumentWritten(
 
 /** Every 5 minutes: verifies awaiting tickets (recovers a missed webhook), expires dead ones and 24 h-old drafts. ≤ 100 per run. */
 export const desk_reconcileTickets = onSchedule(
-  { schedule: "every 5 minutes", region: DESK_REGION, secrets: BUNDLE_SECRETS, timeoutSeconds: 300, memory: "256MiB" },
+  { schedule: "every 30 minutes", region: DESK_REGION, secrets: BUNDLE_SECRETS, timeoutSeconds: 300, memory: "256MiB" },
   async () => { await reconcileTickets(); },
 );
 

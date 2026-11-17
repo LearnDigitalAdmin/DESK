@@ -21,12 +21,12 @@
 
 set -u
 
-BATCH_SIZE="${BATCH_SIZE:-3}"
+BATCH_SIZE="${BATCH_SIZE:-6}"
 RETRIES="${RETRIES:-3}"
 PAUSE="${PAUSE:-30}"
 RETRY_PAUSE="${RETRY_PAUSE:-60}"
 PROJECT="${PROJECT:-}"
-CODEBASE="${CODEBASE:-default}"
+CODEBASE="${CODEBASE:-desk}"
 
 # More heap for the CLI and a longer code-analysis timeout (the "Cannot determine backend specification" error)
 export NODE_OPTIONS="--max-old-space-size=4096"

@@ -20,7 +20,7 @@ export const desk_top_payout = topCallable<TopPayoutIn, TopPayoutOut>(
 
 /** Every 10 minutes: settles `processing` payouts against Paystack Transfers verification. */
 export const desk_reconcilePayouts = onSchedule(
-  { schedule: "every 10 minutes", region: DESK_REGION, secrets: BUNDLE_SECRETS, timeoutSeconds: 300, memory: "256MiB" },
+  { schedule: "every 30 minutes", region: DESK_REGION, secrets: BUNDLE_SECRETS, timeoutSeconds: 300, memory: "256MiB" },
   async () => { await reconcilePayouts(deps()); },
 );
 

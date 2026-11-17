@@ -55,6 +55,7 @@ export default function AddTenantWizard() {
       try {
         const out = await lmmx.createTenant({ profile: toProfileInput(tenant), rentMinor, dueDay, frequency: rent.frequency, recipient: toRecipientInput(rec, check.reuseToken), idempotencyKey: idem.key });
         if (out.needsReview || out.status === "draft") setReview(true);
+        else if (out.status === "active") nav(`${LMM_BASE}/tenant/${out.tenantId}`, { replace: true, state: { justActivated: true } });   // top desk: no code needed
         else nav(`${LMM_BASE}/waiting/${out.tenantId}`, { replace: true });
       } catch (err) { setError({ text: errorText(err), notReady: lmmxCodeOf(err) === "LMMX_E_DESK_NOT_READY" }); }
     });

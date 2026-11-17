@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { DESK_TOP_CODE } from "../../api";
+import { useAgent } from "../../core/useAgent";
 import { Card, FormField, buttonClass, inputClass } from "../../ui";
 import type { ChangeKind, DeskGetTenantOut, PendingChangeView } from "../../api/lmmxContract.ts";
 import { kes } from "../../api/lmmxContract.ts";
@@ -83,7 +85,8 @@ export default function ChangeFlow({ tenant, kind, resume, onClose, onChanged }:
     });
   }
 
-  const copy = kind === "recipient" ? S.change.payoutCopy : S.change.rentCopy;
+  const top = useAgent()?.agentCode === DESK_TOP_CODE;   // COG-0000: no tenant code, no cooling-off
+  const copy = top ? S.change.topCopy : kind === "recipient" ? S.change.payoutCopy : S.change.rentCopy;
   const title = kind === "recipient" ? S.change.payoutTitle : S.change.rentTitle;
 
   if (stage === "form") {
@@ -105,7 +108,7 @@ export default function ChangeFlow({ tenant, kind, resume, onClose, onChanged }:
           {check.dedupe.state !== "ask" && (
             <div className="flex flex-wrap gap-2">
               <button type="button" className={buttonClass.secondary} onClick={onClose} disabled={submit.busy}>{S.common.cancel}</button>
-              <button type="button" className={buttonClass.primary} disabled={submit.busy || check.checking} onClick={() => void request()}>{submit.busy || check.checking ? S.change.sending : S.change.send}</button>
+              <button type="button" className={buttonClass.primary} disabled={submit.busy || check.checking} onClick={() => void request()}>{submit.busy || check.checking ? (top ? S.change.topSending : S.change.sending) : (top ? S.change.topSend : S.change.send)}</button>
             </div>
           )}
         </div>

@@ -4,7 +4,7 @@ import { normalizeKenyaPhone } from "../../src/desk/access/phone";
 import { formatClock } from "../../src/desk/access/time";
 import { PRODUCT_LABEL, scopesForProduct, splitEntityKey } from "../../src/desk/access/scopes";
 import { buildDraft, payloadBytes, payloadProblem, MAX_PAYLOAD_BYTES } from "../../src/desk/access/service/payload";
-import { cleanApplication, validateApplication } from "../../src/desk/onboarding/validation";
+import { cleanApplication, validateApplication, type ApplicationFields } from "../../src/desk/onboarding/validation";
 import { JOURNEY, journeyIndex, nextSteps } from "../../src/desk/onboarding/steps";
 import { AGENT_TERMS } from "../../src/desk/onboarding/terms";
 
@@ -47,18 +47,62 @@ test("payload: draft shape and size guard", () => {
 });
 
 test("application: the server's limits are enforced client-side too", () => {
-  const ok = { name: "Mary Wanjiku", phone: "0712 345 678", idNumber: "12345678", ward: "Karen" };
+  // A complete, valid application. Each assertion overrides only the field it checks.
+  const ok: ApplicationFields = {
+    name: "Mary Wanjiku", phone: "0712 345 678", idNumber: "12345678",
+    county: "Nairobi", constituency: "Lang'ata", ward: "Karen",
+    uplineCode: "", inviteCode: "", role: "",
+  };
   assert.deepEqual(validateApplication(ok), {});
+
+  // name: 2 to 80 characters
   assert.ok(validateApplication({ ...ok, name: "A" }).name);
   assert.ok(validateApplication({ ...ok, name: "x".repeat(81) }).name);
+
+  // phone
   assert.ok(validateApplication({ ...ok, phone: "12345" }).phone);
+
+  // ID: 6 to 12 digits, numbers only
   assert.ok(validateApplication({ ...ok, idNumber: "12345" }).idNumber);
   assert.ok(validateApplication({ ...ok, idNumber: "1234567890123" }).idNumber);
   assert.ok(validateApplication({ ...ok, idNumber: "12345a78" }).idNumber);
+
+  // county / constituency / ward must be chosen (blank or whitespace is refused)
+  assert.ok(validateApplication({ ...ok, county: "" }).county);
+  assert.ok(validateApplication({ ...ok, constituency: "" }).constituency);
+  assert.ok(validateApplication({ ...ok, ward: "" }).ward);
   assert.ok(validateApplication({ ...ok, ward: "  " }).ward);
-  assert.ok(validateApplication({ ...ok, ward: "w".repeat(41) }).ward);
-  assert.deepEqual(cleanApplication({ ...ok, name: "  Mary   Wanjiku ", ward: " Karen " }),
-    { name: "Mary Wanjiku", phone: "+254712345678", idNumber: "12345678", wardId: "Karen" });
+
+  // upline code: COG- followed by 4+ digits
+  assert.deepEqual(validateApplication({ ...ok, uplineCode: "cog-0123" }), {});
+  assert.ok(validateApplication({ ...ok, uplineCode: "BAD" }).uplineCode);
+
+  // invite code: 8 characters, no look-alikes (I, L, O, 0, 1)
+  assert.deepEqual(validateApplication({ ...ok, inviteCode: "abcdefgh" }), {});
+  assert.ok(validateApplication({ ...ok, inviteCode: "ABCDEFG1" }).inviteCode);
+  assert.ok(validateApplication({ ...ok, inviteCode: "ABC" }).inviteCode);
+
+  // upline and invite together are refused
+  assert.ok(validateApplication({ ...ok, uplineCode: "COG-0123", inviteCode: "ABCDEFGH" }).inviteCode);
+
+  // optional fields may be missing altogether without throwing
+  const { uplineCode: _u, inviteCode: _i, role: _r, ...bare } = ok;
+  assert.deepEqual(validateApplication(bare), {});
+
+  // cleaning: trims, collapses spaces, normalises the phone, keeps wardId for older servers
+  assert.deepEqual(
+    cleanApplication({ ...ok, name: "  Mary   Wanjiku ", ward: " Karen " }),
+    {
+      name: "Mary Wanjiku", phone: "+254712345678", idNumber: "12345678",
+      wardId: "Karen", county: "Nairobi", constituency: "Lang'ata", ward: "Karen",
+    },
+  );
+
+  // codes are upper-cased; the role is only sent when no code is used
+  assert.equal(cleanApplication({ ...ok, uplineCode: " cog-0123 " }).uplineCode, "COG-0123");
+  assert.equal(cleanApplication({ ...ok, inviteCode: "abcdefgh" }).inviteCode, "ABCDEFGH");
+  assert.equal(cleanApplication({ ...ok, role: "senior" }).role, "senior");
+  assert.equal("role" in cleanApplication({ ...ok, role: "senior", uplineCode: "COG-0123" }), false);
 });
 
 test("journey: every status has next steps; suspended/closed sit outside the path", () => {

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deskApi } from "../api";
+import { DESK_TOP_CODE, deskApi } from "../api";
+import { useAgent } from "../core/useAgent";
 import type { OtpAction } from "../api";
 import { Modal, FormField, buttonClass } from "../ui";
 import { OtpInput } from "./OtpInput";
+import { actionAlreadyConfirmed } from "./topSession";
 import { errorMessage, isTransientError } from "./errors";
 import { formatClock } from "./time";
 import { useNow } from "./useActiveSession";
@@ -27,14 +29,16 @@ export interface ActionOtpDialogProps {
  * wasted share of the daily OTP allowance). Step 2: the customer reads the code out, the agent enters it.
  */
 export function ActionOtpDialog(props: ActionOtpDialogProps) {
+  // The top desk (COG-0000) needs no customer code: the server confirms for it, so the dialog confirms by itself.
+  const top = useAgent()?.agentCode === DESK_TOP_CODE;
   return (
-    <Modal open={props.open} title="Confirm with the customer" onClose={props.onClose}>
-      {props.open ? <Body {...props} /> : null}
+    <Modal open={props.open} title={top ? "Confirm" : "Confirm with the customer"} onClose={props.onClose}>
+      {props.open ? <Body {...props} autoConfirm={top} /> : null}
     </Modal>
   );
 }
 
-function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDialogProps) {
+function Body({ sessionId, action, summary, onVerified, onClose, autoConfirm }: ActionOtpDialogProps & { autoConfirm: boolean }) {
   const [actionId, setActionId] = useState<string | null>(null);
   const [sentAt, setSentAt] = useState(0);
   const [code, setCode] = useState("");
@@ -54,6 +58,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
     try {
       const out = await deskApi.requestActionOtp({ sessionId, action, summary });
       if (!alive.current) return;
+      if (actionAlreadyConfirmed(out)) { setActionId(out.actionId); setVerified(true); onVerified(out.actionId); return; }   // top desk: already confirmed, nothing was sent
       setActionId(out.actionId); setSentAt(Date.now()); setCode(""); setAttempts(0);
     } catch (e) {
       if (alive.current) setError(errorMessage(e));
@@ -61,7 +66,10 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
       busyRef.current = false;
       if (alive.current) setBusy(null);
     }
-  }, [sessionId, action, summary]);
+  }, [sessionId, action, summary, onVerified]);
+
+  const autoRan = useRef(false);
+  useEffect(() => { if (autoConfirm && !autoRan.current) { autoRan.current = true; void send(); } }, [autoConfirm, send]);
 
   const verify = useCallback(async () => {
     if (!actionId || busyRef.current || code.length !== 6) return;
@@ -91,7 +99,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
   return (
     <div className="min-w-0 space-y-4">
       <div className="min-w-0 rounded-xl bg-gray-50 p-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">The customer will be asked to approve</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{autoConfirm ? "You are confirming" : "The customer will be asked to approve"}</p>
         <p className="mt-1 break-words text-sm font-semibold text-gray-900">{summary}</p>
       </div>
 
@@ -103,7 +111,7 @@ function Body({ sessionId, action, summary, onVerified, onClose }: ActionOtpDial
       ) : !sent ? (
         <div className="min-w-0 space-y-3">
           <p className="break-words text-sm text-gray-700">
-            We will text a 6-digit code to the customer. They should only read it to you if they asked for this.
+            {autoConfirm && !error ? "Confirming for the top desk. No customer code is needed." : "We will text a 6-digit code to the customer. They should only read it to you if they asked for this."}
           </p>
           {error && <p role="alert" className="break-words text-sm text-red-600">{error}</p>}
           <div className="flex min-w-0 flex-wrap gap-2">

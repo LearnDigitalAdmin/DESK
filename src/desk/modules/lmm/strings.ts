@@ -77,6 +77,8 @@ export const S = {
       "If the due date is near, the change starts after this month's payout.",
     ],
     rentCopy: ["The tenant gets a code by SMS and must confirm it.", "Double-check the new rent with the tenant."],
+    topCopy: ["As the top desk this change applies at once. No tenant code and no waiting period.", "The tenant and the landlords are told by SMS, and it is saved in the audit log.", "Double-check the details with the tenant before you send."],
+    topSend: "Apply now", topSending: "Applying…",
     newRent: "New monthly rent (KES)", send: "Send code to the tenant", sending: "Sending…", doneTitle: "Change confirmed",
     codeTitle: "Waiting for the tenant to confirm", cancelled: "Change cancelled.",
     appliedBody: "The new rent is set.", coolingBody: "The tenant confirmed. The new account starts after 48 hours.", deferredBody: "The tenant confirmed. It starts after this month's payout to the landlord.",

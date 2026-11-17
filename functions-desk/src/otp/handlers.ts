@@ -16,6 +16,7 @@ import {
   entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, takeRates, wrongCodeMessage,
 } from "./core.js";
 import { ACTION_SCOPE, actionSmsText, checkActionSummary } from "./messages.js";
+import { isTopDeskAgent, topActionOtpDoc } from "../sessions/pure.js";
 
 function parseAction(v: unknown): OtpAction {
   if (typeof v !== "string" || !OTP_ACTIONS.has(v as OtpAction)) throw new DeskError("invalid_argument", "Unknown action");
@@ -36,6 +37,14 @@ export async function requestActionOtp(deps: Deps, uid: string, raw: unknown): P
   const ctx = await requireSession({ sessionId, uid, scope: ACTION_SCOPE[action] });
   if (action === "rent_stk" && ctx.product !== "pms") {
     throw new DeskError("failed_precondition", "Rent STK is only available for Plot Yangu accounts");
+  }
+
+  // COG-0000 needs no customer code: the confirmation is created already verified (nothing is sent to the customer).
+  if (isTopDeskAgent(agent)) {
+    const tref = col("actionOtps").doc();
+    await tref.create(topActionOtpDoc({ actionId: tref.id, sessionId, agentId: uid, action, summary, now: deps.now() }));
+    await audit({ action: "action_otp_verified", agentId: uid, entityKey: ctx.entityKey, sessionId, meta: { otpAction: action, actionId: tref.id, topNoOtp: true } });
+    return { actionId: tref.id, verified: true };
   }
 
   // Re-check with the product now: the customer may have removed this desk since the session opened.

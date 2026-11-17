@@ -18,7 +18,7 @@ import {
   accessHourRule, entityDailyRule, evaluateOtpAttempt, hashOtp, isOtpShape, OTP_TTL_MS, SESSION_TTL_MS, takeRates, wrongCodeMessage,
 } from "../otp/core.js";
 import { accessSmsText } from "../otp/messages.js";
-import { validateScopes } from "./pure.js";
+import { isTopDeskAgent, topSessionDoc, validateScopes } from "./pure.js";
 
 export async function requestAccess(deps: Deps, uid: string, raw: unknown): Promise<RequestAccessOut> {
   const d = record(raw);
@@ -34,7 +34,8 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
     throw new DeskError("permission_denied", "You cannot open a session on an account you administer yourself");
   }
 
-  const taken = await takeRates([accessHourRule(uid, entity.entityKey), entityDailyRule(entity.entityKey)], deps.now());
+  const top = isTopDeskAgent(agent);   // COG-0000 needs no customer code: no SMS is sent, so no rate allowance is used either
+  const taken = top ? undefined : await takeRates([accessHourRule(uid, entity.entityKey), entityDailyRule(entity.entityKey)], deps.now());
 
   // Older unverified codes for this desk and customer stop being usable.
   const stale = await col("sessions").where("agentId", "==", uid).where("entityKey", "==", entity.entityKey).where("status", "==", "pending").get();
@@ -44,6 +45,14 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
     await batch.commit();
   }
 
+  if (top) {
+    const tref = col("sessions").doc();
+    const tdoc = topSessionDoc({ sessionId: tref.id, agentId: uid, entityKey: entity.entityKey, scopes, now: deps.now() });
+    await tref.create(tdoc);
+    await audit({ action: "access_requested", agentId: uid, entityKey: entity.entityKey, sessionId: tref.id, meta: { scopes, topNoOtp: true } });
+    await audit({ action: "access_verified", agentId: uid, entityKey: entity.entityKey, sessionId: tref.id, meta: { claimed: false, topNoOtp: true } });
+    return { sessionId: tref.id, otpSentTo: "", verified: true, expiresAt: tdoc.expiresAt };
+  }
   const ref = col("sessions").doc();
   const otp = deps.randomOtp();
   const now = deps.now();
@@ -56,7 +65,7 @@ export async function requestAccess(deps: Deps, uid: string, raw: unknown): Prom
     await deps.sendSms(adminPhone, accessSmsText(agent.name, agent.agentCode, lookup.info.displayName, otp));
   } catch {
     await ref.delete().catch(() => undefined);
-    await taken.release();
+    await taken?.release();
     throw new DeskError("internal", "We could not send the access code to the customer. Please try again.");
   }
   await audit({ action: "access_requested", agentId: uid, entityKey: entity.entityKey, sessionId: ref.id, meta: { scopes } });

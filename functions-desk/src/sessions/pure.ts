@@ -8,6 +8,23 @@ const SCOPE_SET: Record<Scope, true> = {
 export const ALL_SCOPES = Object.keys(SCOPE_SET) as Scope[];
 
 /** A non-empty subset of Scope, deduplicated, in contract order. Pure. */
+import { DESK_TOP_CODE, type OtpAction, type EntityKey, type Scope as ScopeT } from "../contract.js";
+import { SESSION_TTL_MS } from "../otp/core.js";
+import type { ActionOtpDoc, SessionDoc } from "../types.js";
+
+/** The top desk (COG-0000) is the Samuhia internal support desk: it needs no customer OTP to open an account or confirm an action. Everyone else always does. */
+export function isTopDeskAgent(a: { agentCode?: string; status?: string } | undefined): boolean {
+  return !!a && a.agentCode === DESK_TOP_CODE && a.status === "active";
+}
+/** A session that is open from the start (no code was sent, so there is nothing to verify). */
+export function topSessionDoc(p: { sessionId: string; agentId: string; entityKey: EntityKey; scopes: ScopeT[]; now: number }): SessionDoc {
+  return { sessionId: p.sessionId, agentId: p.agentId, entityKey: p.entityKey, scopes: p.scopes, status: "active", otpAttempts: 0, otpExpiresAt: p.now, otpVerifiedAt: p.now, expiresAt: p.now + SESSION_TTL_MS, createdAt: p.now };
+}
+/** An action confirmation that is already verified (single use, fresh for ACTION_OTP_FRESH_MS like any other). */
+export function topActionOtpDoc(p: { actionId: string; sessionId: string; agentId: string; action: OtpAction; summary: string; now: number }): ActionOtpDoc {
+  return { actionId: p.actionId, sessionId: p.sessionId, agentId: p.agentId, action: p.action, summary: p.summary, otpHash: "", otpAttempts: 0, otpExpiresAt: p.now, verifiedAt: p.now, createdAt: p.now };
+}
+
 export function validateScopes(v: unknown): Scope[] {
   if (!Array.isArray(v) || v.length === 0) throw new DeskError("invalid_argument", "Choose at least one thing you need access to");
   const wanted = new Set<string>();

@@ -40,6 +40,8 @@ export default function OnboardingScreen() {
 function ApplicationForm() {
   const email = useAccountEmail();
   const [f, setF] = useState<ApplicationFields>({ name: "", phone: "", idNumber: "", county: "", constituency: "", ward: "", uplineCode: "", inviteCode: "", role: "" });
+  // The two code fields are optional in the type, so read them through this one flag.
+  const hasCode = Boolean(f.uplineCode?.trim() || f.inviteCode?.trim());
   const [kenya, setKenya] = useState<KenyaCounty[]>([]);
   const [roles, setRoles] = useState<NetRoleOption[]>([]);
   const [haveCode, setHaveCode] = useState(false);
@@ -47,11 +49,11 @@ function ApplicationForm() {
   // Which roles this ward can offer (only where the hierarchy already exists). Everyone else is a clerk under Samuhia.
   useEffect(() => {
     setRoles([]);
-    if (!f.county || !f.constituency || !f.ward || f.uplineCode.trim() || f.inviteCode.trim()) return;
+    if (!f.county || !f.constituency || !f.ward || hasCode) return;
     let live = true;
     deskApi.net.options({ county: f.county, constituency: f.constituency, ward: f.ward }).then((o) => { if (live) setRoles(o.roles.filter((r) => r.available)); }).catch(() => undefined);
     return () => { live = false; };
-  }, [f.county, f.constituency, f.ward, f.uplineCode, f.inviteCode]);
+  }, [f.county, f.constituency, f.ward, hasCode]);
   const [accepted, setAccepted] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [tried, setTried] = useState(false);
@@ -132,16 +134,16 @@ function ApplicationForm() {
         {haveCode && (
           <>
             <FormField label="Agent code (optional)" htmlFor="ob-up" hint="A senior's code makes you a clerk, a lead's a senior, an admin's a lead." error={show("uplineCode")}>
-              <input id="ob-up" className={inputClass} value={f.uplineCode} onChange={(e) => set("uplineCode")({ target: { value: e.target.value.toUpperCase() } })} placeholder="COG-0123" maxLength={20} autoComplete="off" />
+              <input id="ob-up" className={inputClass} value={f.uplineCode ?? ""} onChange={(e) => set("uplineCode")({ target: { value: e.target.value.toUpperCase() } })} placeholder="COG-0123" maxLength={20} autoComplete="off" />
             </FormField>
             <FormField label="Invite code (optional)" htmlFor="ob-inv" hint="From the SMS an agent sent you." error={show("inviteCode")}>
-              <input id="ob-inv" className={inputClass} value={f.inviteCode} onChange={(e) => set("inviteCode")({ target: { value: e.target.value.toUpperCase() } })} maxLength={12} autoComplete="off" />
+              <input id="ob-inv" className={inputClass} value={f.inviteCode ?? ""} onChange={(e) => set("inviteCode")({ target: { value: e.target.value.toUpperCase() } })} maxLength={12} autoComplete="off" />
             </FormField>
           </>
         )}
-        {roles.length > 0 && !f.uplineCode.trim() && !f.inviteCode.trim() && (
+        {roles.length > 0 && !hasCode && (
           <FormField label="Join as" htmlFor="ob-role" hint="Your ward already has a team. We place you with the team that has the fewest members. Leave on the default to start as a clerk under Samuhia.">
-            <select id="ob-role" className={inputClass} value={f.role} onChange={(e) => setF((c) => ({ ...c, role: e.target.value as ApplicationFields["role"] }))}>
+            <select id="ob-role" className={inputClass} value={f.role ?? ""} onChange={(e) => setF((c) => ({ ...c, role: e.target.value as ApplicationFields["role"] }))}>
               <option value="">Clerk under Samuhia (default)</option>
               {roles.map((r) => <option key={r.role} value={r.role}>{RANK_LABEL[r.role]}{r.slotsLeft !== undefined ? ` (${r.slotsLeft} place${r.slotsLeft === 1 ? "" : "s"} left)` : ""}</option>)}
             </select>
