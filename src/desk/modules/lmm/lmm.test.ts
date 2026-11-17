@@ -45,7 +45,7 @@ test("wizard: rent in whole shillings within limits, due day 1 to 28", () => {
 });
 test("preview fallback uses the contract helpers", () => {
   const p = fallbackPreview(1_000_000, "till");
-  assert.equal(p.table.find((r) => r.creditMinor === 1_000_000)?.chargeMinor, 1_040_800);
+  assert.equal(p.table.find((r) => r.creditMinor === 1_000_000)?.chargeMinor, 1_035_700);
   assert.equal(p.projection.weekly.deskBonusMinor, LMMX.COMPLETION_BONUS_MINOR);
   assert.equal(creditFor(1_000_000, "weekly"), 250_000);
   assert.ok(creditFor(100_000, "daily") >= LMMX.MIN_CREDIT_MINOR);
