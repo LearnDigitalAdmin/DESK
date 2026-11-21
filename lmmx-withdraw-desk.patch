@@ -1,0 +1,669 @@
+diff --git a/functions/src/__tests__/lmmx/lmmx.test.ts b/functions/src/__tests__/lmmx/lmmx.test.ts
+index faa7ffa..a54b345 100644
+--- a/functions/src/__tests__/lmmx/lmmx.test.ts
++++ b/functions/src/__tests__/lmmx/lmmx.test.ts
+@@ -127,6 +127,46 @@ describe('main menu routing', () => {
+   });
+ });
+ 
++describe('my money: pay landlord now and withdraw (no amount typed, no account settings)', () => {
++  const enter = async (id: string, lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say(id); return r; };
++  test('the home screen has My money; it shows everything available and what a withdrawal nets after the fee', async () => {
++    const r = await enter('11111111'); await r.tap('My money');
++    assert.equal(r.state, STATE.LMMX_MONEY); assert.match(r.body(), /KES 4,000/); assert.match(r.body(), /KES 3,971/); assert.match(r.body(), /KES 29/); assert.match(r.body(), /within 24 hours/);
++    assert.deepEqual(r.titles(), ['Pay landlord now', 'Withdraw', 'Back']); assert.doesNotMatch(r.body(), /enter an amount|how much/i);
++  });
++  test('Pay landlord now: confirm, then it is requested (the server decides the amount and the timing)', async () => {
++    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Pay landlord now');
++    assert.equal(r.state, STATE.LMMX_LCONFIRM); assert.match(r.body(), /KES 4,000/);
++    await r.tap('Confirm'); assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /within 24 hours/);
++  });
++  test('Withdraw: confirm shows the fee and net and that it goes only to this number; a code is texted; the LMW code works from anywhere', async () => {
++    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Withdraw');
++    assert.equal(r.state, STATE.LMMX_WCONFIRM); assert.match(r.body(), /0712345678/); assert.match(r.body(), /KES 29/); assert.match(r.body(), /KES 3,971/); assert.match(r.body(), /only to this number/);
++    await r.tap('Send me a code'); assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /LMW1234/); assert.match(r.body(), /0712345678/);
++    const before = r.state; await r.say('LMW4683');
++    assert.match(r.allText(), /Withdrawal requested/); assert.match(r.allText(), /KES 3,971/); assert.equal(r.state, before, 'the session is not moved by the code');
++    await r.say('lmw 0000'); assert.match(r.allText(), /not right|expired|match|locked|check that code/i);
++  });
++  test('below KES 50 there is nothing to move and no buttons to do it', async () => {
++    const r = await enter('55555555'); await r.tap('My money');
++    assert.equal(r.state, STATE.LMMX_MONEY); assert.match(r.body(), /at least KES 50/); assert.deepEqual(r.titles(), ['Back', 'Main menu']);
++  });
++  test('Back from the confirm screens returns to My money, and from My money to the home screen', async () => {
++    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Withdraw'); await r.tap('Back');
++    assert.equal(r.state, STATE.LMMX_MONEY); await r.tap('Back'); assert.equal(r.state, STATE.LMMX_HOME);
++  });
++  test('Swahili works end to end', async () => {
++    const r = await enter('11111111', 'sw'); await r.tap('Pesa zangu'); assert.equal(r.state, STATE.LMMX_MONEY); assert.deepEqual(r.titles().slice(0, 2), ['Lipa mwenye nyumba', 'Toa pesa']); assert.equal(r.titles().length, 3);
++    await r.tap('Toa pesa'); await r.tap('Nitumie msimbo'); assert.match(r.body(), /LMW1234/); await r.say('LMW4683'); assert.match(r.allText(), /Ombi la kutoa pesa limepokelewa/);
++  });
++  test('a payout error from PAY is explained, never a crash; the bot has no account-settings states', async () => {
++    const orig = client.payLandlord; (client as any).payLandlord = async () => { throw new LmmxBotError('too little', 'LMMX_E_AMOUNT'); };
++    try { const r = await enter('11111111'); await r.tap('My money'); await r.tap('Pay landlord now'); await r.tap('Confirm'); assert.equal(r.state, STATE.LMMX_DONE); assert.ok(r.body().length > 10); }
++    finally { (client as any).payLandlord = orig; }
++    assert.deepEqual(Object.values(STATE).filter((s) => /SETTING|PROFILE|NAME|CHANGE|DUE_?DAY|PLAN/i.test(String(s)) && /LMMX/.test(String(s))), []);
++  });
++});
++
+ describe('lookup results', () => {
+   const enter = async (id: string, lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say(id); return r; };
+   test('standalone: status with rent, balance, due and pay-by dates', async () => {
+@@ -134,7 +174,7 @@ describe('lookup results', () => {
+     assert.equal(r.state, STATE.LMMX_HOME);
+     assert.match(r.body(), /Hello Mary/); assert.match(r.body(), /KES 10,000/); assert.match(r.body(), /KES 7,500/); assert.match(r.body(), /5 Dec/); assert.match(r.body(), /2 Dec/);
+     assert.match(r.body(), /Pay by 2 Dec so your landlord gets all of it on 5 Dec/);
+-    assert.deepEqual(r.titles(), ['Pay now', 'Back', 'Main menu']);
++    assert.deepEqual(r.titles(), ['Pay now', 'My money', 'Main menu']);
+   });
+   test('none (also a phone and ID mismatch): friendly not-found with three ways forward', async () => {
+     const r = await enter('99999999');
+@@ -273,7 +313,7 @@ describe('copy', () => {
+   });
+   test('every new key resolves through lmxm and lmxl in both languages, with no unfilled placeholder but the documented ones', () => {
+     for (const lang of LANGS) {
+-      for (const k of Object.keys(LMMX_MESSAGES)) assert.doesNotMatch(lmxm(k as any, lang, { text: 't', phones: 'p', name: 'n', rent: 'r', balance: 'b', due: 'd', payby: 'p', min: '1', max: '2', suggested: 's', credit: 'c', fees: 'f', charge: 'g', phone: '0', summary: '' }), /\{\w+\}/, k);
++      for (const k of Object.keys(LMMX_MESSAGES)) assert.doesNotMatch(lmxm(k as any, lang, { text: 't', phones: 'p', name: 'n', rent: 'r', balance: 'b', due: 'd', payby: 'p', min: '1', max: '2', suggested: 's', credit: 'c', fees: 'f', charge: 'g', phone: '0', summary: '', avail: 'a', net: 'n', fee: 'f', message: 'm' }), /\{\w+\}/, k);
+       for (const k of Object.keys(LMMX_LABELS)) assert.ok(lmxl(k as any, lang, { amount: 'KES 1,250,000,000' }).length <= 20, k);
+     }
+   });
+diff --git a/functions/src/constants/lmmx.messages.ts b/functions/src/constants/lmmx.messages.ts
+index 6877cd3..2cda28a 100644
+--- a/functions/src/constants/lmmx.messages.ts
++++ b/functions/src/constants/lmmx.messages.ts
+@@ -17,6 +17,10 @@ export const LMMX_LABELS = {
+   CHECK: { en: 'Check balance', sw: 'Angalia salio' },
+   PAY_MORE: { en: 'Pay more', sw: 'Lipa zaidi' },
+   PAY_AMOUNT: { en: 'Pay {amount}', sw: 'Lipa {amount}' },
++  MONEY: { en: 'My money', sw: 'Pesa zangu' },
++  PAY_LANDLORD: { en: 'Pay landlord now', sw: 'Lipa mwenye nyumba' },
++  WITHDRAW: { en: 'Withdraw', sw: 'Toa pesa' },
++  SEND_CODE: { en: 'Send me a code', sw: 'Nitumie msimbo' },
+ } satisfies Record<string, Bi>;
+ 
+ export type LmmxLabelKey = keyof typeof LMMX_LABELS;
+@@ -127,6 +131,38 @@ export const LMMX_MESSAGES = {
+     en: 'Pay your rent in small amounts, at your own pace. Your landlord does not need to join.',
+     sw: 'Lipa kodi yako kwa awamu ndogo, kwa kasi yako. Mwenye nyumba hahitaji kujiunga.',
+   },
++  MONEY: {
++    en: '*My money* 💰\n\nYou have *{avail}* paid in that has not gone to your landlord yet.\n\n• *Pay landlord now*: we send all of it to your landlord within 24 hours.\n• *Withdraw*: we send {net} to your M-PESA (after a {fee} fee), within 24 hours.\n\nYou do not type an amount. We move everything you have here.',
++    sw: '*Pesa zangu* 💰\n\nUna *{avail}* ulizolipa ambazo bado hazijaenda kwa mwenye nyumba.\n\n• *Lipa mwenye nyumba*: tunamtumia zote ndani ya saa 24.\n• *Toa pesa*: tunakutumia {net} kwenye M-PESA yako (baada ya ada ya {fee}), ndani ya saa 24.\n\nHuandiki kiasi. Tunahamisha zote ulizo nazo hapa.',
++  },
++  MONEY_NONE: {
++    en: '*My money* 💰\n\nYou have {avail} paid in. You need at least {min} to pay your landlord early or to withdraw.',
++    sw: '*Pesa zangu* 💰\n\nUna {avail} ulizolipa. Unahitaji angalau {min} ili umlipe mwenye nyumba mapema au utoe pesa.',
++  },
++  MONEY_PENDING: {
++    en: 'A request is already on its way. It will be done within 24 hours.',
++    sw: 'Ombi lipo njiani tayari. Litakamilika ndani ya saa 24.',
++  },
++  LCONFIRM: {
++    en: 'Send *{avail}* to your landlord now? It goes to the landlord account on record, within 24 hours.',
++    sw: 'Mtumie mwenye nyumba *{avail}* sasa? Inaenda kwenye akaunti yake iliyosajiliwa, ndani ya saa 24.',
++  },
++  LDONE: {
++    en: '✅ {message}',
++    sw: '✅ {message}',
++  },
++  WCONFIRM: {
++    en: 'Withdraw *{avail}* to your M-PESA *{phone}*?\n\nAfter the {fee} fee you get *{net}*. It goes only to this number. We will text a code to it first.',
++    sw: 'Toa *{avail}* kwenda M-PESA yako *{phone}*?\n\nBaada ya ada ya {fee} unapata *{net}*. Inaenda kwa namba hii tu. Kwanza tutatuma msimbo kwa namba hii.',
++  },
++  WCODE_SENT: {
++    en: '📲 We texted a code to *{phone}*, like *LMW1234*.\n\nSend that code here as a message (or tap the link in the SMS). It lasts 30 minutes. Never share it with anyone else.',
++    sw: '📲 Tumetuma msimbo kwa *{phone}*, kama *LMW1234*.\n\nTuma msimbo huo hapa kama ujumbe (au bonyeza kiungo kwenye SMS). Unadumu dakika 30. Usimpe mtu mwingine.',
++  },
++  CODE_WD_OK: {
++    en: '✅ *Withdrawal requested.*\n\n{summary} will be sent to your M-PESA within 24 hours. We will text you when it is sent.\n\nIf you did not ask for this, contact support on {phone} at once.',
++    sw: '✅ *Ombi la kutoa pesa limepokelewa.*\n\n{summary} itatumwa kwenye M-PESA yako ndani ya saa 24. Tutakutumia SMS ikitumwa.\n\nUsipoomba hili, wasiliana na msaada kwa {phone} mara moja.',
++  },
+   CODE_SETUP_OK: {
+     en: '✅ *Lipa Mdogo Mdogo is on!*\n\nYour sign-up is confirmed.{summary}\n\nNext: type *#*, then choose *Lipa Mdogo Mdogo* to pay your rent in small amounts.',
+     sw: '✅ *Lipa Mdogo Mdogo imewashwa!*\n\nKujiunga kwako kumethibitishwa.{summary}\n\nInayofuata: andika *#*, kisha chagua *Lipa Mdogo Mdogo* ulipe kodi yako kwa awamu ndogo.',
+diff --git a/functions/src/constants/states.ts b/functions/src/constants/states.ts
+index 0def614..df60258 100644
+--- a/functions/src/constants/states.ts
++++ b/functions/src/constants/states.ts
+@@ -33,6 +33,9 @@ export enum STATE {
+   LMMX_AMOUNT = 'LMMX_AMOUNT',
+   LMMX_PHONE = 'LMMX_PHONE',
+   LMMX_CONFIRM = 'LMMX_CONFIRM',
++  LMMX_MONEY = 'LMMX_MONEY',
++  LMMX_LCONFIRM = 'LMMX_LCONFIRM',
++  LMMX_WCONFIRM = 'LMMX_WCONFIRM',
+   LMMX_DONE = 'LMMX_DONE',
+   LMMX_JOIN = 'LMMX_JOIN',
+ 
+diff --git a/functions/src/handlers/lmmx.handler.ts b/functions/src/handlers/lmmx.handler.ts
+index 764a9d3..f4b040a 100644
+--- a/functions/src/handlers/lmmx.handler.ts
++++ b/functions/src/handlers/lmmx.handler.ts
+@@ -65,7 +65,7 @@ const homeScreen = (lang: Lang, s: NonNullable<BotLookupOut['standalone']>): Out
+       due: shortDate(s.dueDate),
+       payby: shortDate(s.payByDate),
+     }),
+-    [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('0', ulabel('BACK', lang)), mainButton(lang)]
++    [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('MONEY', lmxl('MONEY', lang)), mainButton(lang)]
+   );
+ 
+ const amountScreen = (lang: Lang, suggestedMinor: number): Outbound =>
+@@ -88,6 +88,30 @@ const phoneScreen = (lang: Lang, q: SavedQuote, sender: string | null): Outbound
+ const confirmScreen = (lang: Lang, q: SavedQuote, payer: string): Outbound =>
+   uiButtons(quoteLines(lang, q, 'CONFIRM', payer), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
+ 
++// ── My money: pay the landlord now / withdraw (no amount typed; PAY takes everything available, at least KES 50) ──
++
++const MIN_PAYOUT = LMMX.MIN_PAYOUT_MINOR;
++async function moneyScreen(phone: string, session: Session, notice?: string): Promise<Reply> {
++  const lang = session.language;
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++  try {
++    const out = await lmmx.lookup(sender, id);
++    const s = out.kind === 'standalone' ? out.standalone : undefined;
++    if (!s) return afterLookup(phone, session, id, out);
++    if (s.frozen || s.awaitingSetup) return afterLookup(phone, session, id, out);
++    const avail = s.availableMinor ?? 0;
++    const fee = s.withdrawFeeMinor ?? 0;
++    await updateSessionState(phone, STATE.LMMX_MONEY, {});
++    const text = avail >= MIN_PAYOUT ? lmxm('MONEY', lang, { avail: kes(avail), fee: kes(fee), net: kes(avail - fee) }) : lmxm('MONEY_NONE', lang, { avail: kes(avail), min: kes(MIN_PAYOUT) });
++    const buttons = avail >= MIN_PAYOUT ? [btn('PAYLORD', lmxl('PAY_LANDLORD', lang)), btn('WITHDRAW', lmxl('WITHDRAW', lang)), back(lang)] : [back(lang), mainButton(lang)];
++    return uiButtons(notice ? `${notice}\n\n${text}` : text, buttons);
++  } catch (err) {
++    return lookupFailed(phone, session, err);
++  }
++}
++
+ const afterPayButtons = (lang: Lang) => [btn('CHECK', lmxl('CHECK', lang)), btn('PAYNOW', lmxl('PAY_MORE', lang)), mainButton(lang)];
+ 
+ // ── Errors ───────────────────────────────────────────────────────────────
+@@ -211,8 +235,12 @@ async function navigate(phone: string, input: string, session: Session): Promise
+     case STATE.LMMX_NOTFOUND:
+       return beginLmmx(phone, session);
+     case STATE.LMMX_AMOUNT:
++    case STATE.LMMX_MONEY:
+     case STATE.LMMX_DONE:
+       return refreshHome(phone, session);
++    case STATE.LMMX_LCONFIRM:
++    case STATE.LMMX_WCONFIRM:
++      return moneyScreen(phone, session);
+     case STATE.LMMX_PHONE:
+       await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
+       return amountScreen(lang, Number(session.context?.lmxSug ?? 0));
+@@ -270,9 +298,79 @@ export async function handleLmmxHome(phone: string, input: string, session: Sess
+     await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
+     return amountScreen(session.language, Number(session.context?.lmxSug ?? 0));
+   }
++  if (input.trim().toUpperCase() === 'MONEY') return moneyScreen(phone, session);
+   return refreshHome(phone, session);
+ }
+ 
++/** My money: Pay landlord now, or Withdraw. */
++export async function handleLmmxMoney(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const choice = input.trim().toUpperCase();
++  if (choice !== 'PAYLORD' && choice !== 'WITHDRAW') return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++  try {
++    const out = await lmmx.lookup(sender, id);
++    const s = out.kind === 'standalone' ? out.standalone : undefined;
++    if (!s || s.frozen || s.awaitingSetup || (s.availableMinor ?? 0) < MIN_PAYOUT) return moneyScreen(phone, session);
++    const avail = s.availableMinor ?? 0;
++    const fee = s.withdrawFeeMinor ?? 0;
++    if (choice === 'PAYLORD') {
++      await updateSessionState(phone, STATE.LMMX_LCONFIRM, {});
++      return uiButtons(lmxm('LCONFIRM', lang, { avail: kes(avail) }), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
++    }
++    await updateSessionState(phone, STATE.LMMX_WCONFIRM, {});
++    return uiButtons(lmxm('WCONFIRM', lang, { avail: kes(avail), fee: kes(fee), net: kes(avail - fee), phone: localPhone(sender) }), [btn('YES', lmxl('SEND_CODE', lang)), back(lang), mainButton(lang)]);
++  } catch (err) {
++    return lookupFailed(phone, session, err);
++  }
++}
++
++const isYes = (input: string): boolean => ['YES', 'NDIO', 'CONFIRM', 'THIBITISHA'].includes(input.trim().toUpperCase());
++
++/** Confirm: pay my landlord now. */
++export async function handleLmmxLConfirm(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++  if (!isYes(input)) return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
++  try {
++    const r = await lmmx.payLandlord(sender, id);
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm('LDONE', lang, { message: r.message.slice(0, 300) }), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
++  } catch (err) {
++    logFail('payLandlord', err);
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm(errorKey(err), lang), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
++  }
++}
++
++/** Confirm: withdraw. Sends the code to the phone on record; the tenant replies LMW#### here (any state) or taps the SMS link. */
++export async function handleLmmxWConfirm(phone: string, input: string, session: Session): Promise<Reply> {
++  const nav = await navigate(phone, input, session);
++  if (nav) return nav;
++  const lang = session.language;
++  const id = ctxId(session);
++  const sender = normalizeKePhone(phone);
++  if (!id || !sender) return beginLmmx(phone, session);
++  if (!isYes(input)) return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
++  try {
++    await lmmx.withdrawStart(sender, id);
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm('WCODE_SENT', lang, { phone: localPhone(sender) }), [mainButton(lang)]);
++  } catch (err) {
++    logFail('withdrawStart', err);
++    await updateSessionState(phone, STATE.LMMX_DONE, {});
++    return uiButtons(lmxm(errorKey(err), lang), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
++  }
++}
++
+ /** After a payment attempt, or a frozen / awaiting-setup answer: Check balance, Pay more, or leave. */
+ export async function handleLmmxDone(phone: string, input: string, session: Session): Promise<Reply> {
+   const nav = await navigate(phone, input, session);
+@@ -388,6 +486,7 @@ export async function lmmxCodeReply(phone: string, text: string, lang: Lang): Pr
+     switch (r.result) {
+       case 'setup_confirmed': return uiText(lmxm('CODE_SETUP_OK', lang, { summary: summaryOf(r) }));
+       case 'change_confirmed': return uiText(lmxm('CODE_CHANGE_OK', lang, { summary: summaryOf(r) }));
++      case 'withdraw_requested': return uiText(lmxm('CODE_WD_OK', lang, { summary: (r.summary ?? 'Your money').replace(/\s+/g, ' ').trim().slice(0, 60), phone: LMMX_SUPPORT_PHONE }));
+       case 'change_cancelled': return uiText(lmxm('CODE_CANCELLED', lang));
+       case 'expired': return uiText(lmxm('CODE_EXPIRED', lang));
+       case 'locked': return uiText(lmxm('CODE_LOCKED', lang));
+diff --git a/functions/src/services/lmmx.client.ts b/functions/src/services/lmmx.client.ts
+index 0bd0f06..d144995 100644
+--- a/functions/src/services/lmmx.client.ts
++++ b/functions/src/services/lmmx.client.ts
+@@ -18,6 +18,8 @@ import {
+   BotQuoteOut,
+   LmmxCallableMap,
+   LmmxErrorCode,
++  PayoutRequestOut,
++  WithdrawStartOut,
+   botSigMessage,
+   normalizeKePhone,
+   parseLmmxCode,
+@@ -28,7 +30,7 @@ const BASE = process.env.PAY_FUNCTIONS_BASE || 'https://africa-south1-plot-9fd6e
+ /** A signed call is valid for 5 minutes, so a call that has not answered in 25 seconds is treated as unknown, not as failed. */
+ const TIMEOUT_MS = 25_000;
+ 
+-export type BotOp = 'lmmx_bot_lookup' | 'lmmx_bot_quote' | 'lmmx_bot_pay' | 'lmmx_bot_confirmCode' | 'lmmx_bot_joinInfo';
++export type BotOp = 'lmmx_bot_lookup' | 'lmmx_bot_quote' | 'lmmx_bot_pay' | 'lmmx_bot_confirmCode' | 'lmmx_bot_payLandlord' | 'lmmx_bot_withdrawStart' | 'lmmx_bot_joinInfo';
+ type Payload<K extends BotOp> = Omit<LmmxCallableMap[K]['in'], keyof BotAuth>;
+ 
+ /** `code` is PAY's `details.lmmx` when it sent one; `timeout` means we do not know whether PAY did the work. */
+@@ -72,6 +74,10 @@ export const quote = (phone: string, idNumber: string, creditMinor: number): Pro
+ export const pay = (phone: string, idNumber: string, quoteId: string, payerPhone: string): Promise<BotPayOut> =>
+   call('lmmx_bot_pay', { phone, idNumber, quoteId, payerPhone });
+ export const confirmCode = (phone: string, text: string): Promise<BotConfirmCodeOut> => call('lmmx_bot_confirmCode', { phone, text });
++/** Pay the landlord everything available now (no amount typed; PAY decides). */
++export const payLandlord = (phone: string, idNumber: string): Promise<PayoutRequestOut> => call('lmmx_bot_payLandlord', { phone, idNumber });
++/** Starts a withdrawal: PAY texts a code (LMW1234) to the phone on record, which IS this WhatsApp number. The code comes back here as a normal message. */
++export const withdrawStart = (phone: string, idNumber: string): Promise<WithdrawStartOut> => call('lmmx_bot_withdrawStart', { phone, idNumber });
+ export const joinInfo = (): Promise<BotJoinInfoOut> => call('lmmx_bot_joinInfo', {});
+ 
+ // ── Mock mode ────────────────────────────────────────────────────────────
+@@ -88,7 +94,8 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
+   switch (op) {
+     case 'lmmx_bot_lookup': {
+       const id = String(p.idNumber);
+-      const standalone = { firstName: 'Mary', rentMinor: MOCK_RENT, remainingMinor: MOCK_REMAINING, dueDate: '2026-12-05', payByDate: '2026-12-02', suggestedCreditMinor: 250_000 };
++      const standalone = { firstName: 'Mary', rentMinor: MOCK_RENT, remainingMinor: MOCK_REMAINING, dueDate: '2026-12-05', payByDate: '2026-12-02', suggestedCreditMinor: 250_000, availableMinor: 400_000, withdrawFeeMinor: 2_900 };
++      if (id === '55555555') return { kind: 'standalone', standalone: { ...standalone, availableMinor: 3_000, withdrawFeeMinor: 0 } } satisfies BotLookupOut;
+       if (id === '11111111') return { kind: 'standalone', standalone } satisfies BotLookupOut;
+       if (id === '22222222') return { kind: 'legacy' } satisfies BotLookupOut;
+       if (id === '33333333') return { kind: 'standalone', standalone: { ...standalone, frozen: true } } satisfies BotLookupOut;
+@@ -122,7 +129,7 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
+     }
+     case 'lmmx_bot_confirmCode': {
+       const parsed = parseLmmxCode(p.text);
+-      const full = parsed ? `${parsed.kind === 'otp' ? 'LMM' : 'LMC'}${parsed.code}` : '';
++      const full = parsed ? `${parsed.kind === 'otp' ? 'LMM' : parsed.kind === 'cancel' ? 'LMC' : 'LMW'}${parsed.code}` : '';
+       const phoneOk = normalizeKePhone(p.phone) !== null;
+       if (!parsed || !phoneOk) return { result: 'invalid' } satisfies BotConfirmCodeOut;
+       switch (full) {
+@@ -131,10 +138,19 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
+         case 'LMC4683': return { result: 'change_cancelled' } satisfies BotConfirmCodeOut;
+         case 'LMM0000': return { result: 'expired' } satisfies BotConfirmCodeOut;
+         case 'LMM9999': return { result: 'locked' } satisfies BotConfirmCodeOut;
++        case 'LMW4683': return { result: 'withdraw_requested', summary: 'KES 3,971' } satisfies BotConfirmCodeOut;
+         case 'LMM2222': return { result: 'not_found' } satisfies BotConfirmCodeOut;
+         default: return { result: 'invalid' } satisfies BotConfirmCodeOut;
+       }
+     }
++    case 'lmmx_bot_payLandlord': {
++      if (String(p.idNumber) === '66666666') throw new LmmxBotError('too little', 'LMMX_E_AMOUNT');
++      return { requestedMinor: 400_000, message: 'Request received. KES 4,000 will be sent to your landlord within 24 hours.' } satisfies PayoutRequestOut;
++    }
++    case 'lmmx_bot_withdrawStart': {
++      if (String(p.idNumber) === '66666666') throw new LmmxBotError('too little', 'LMMX_E_AMOUNT');
++      return { availableMinor: 400_000, feeMinor: 2_900, netMinor: 397_100, otpExpiresAt: Date.now() + 30 * 60_000 } satisfies WithdrawStartOut;
++    }
+     case 'lmmx_bot_joinInfo':
+       return { supportPhones: ['0791286165', '0101716473'], text: 'Samuhia sets you up at a desk in a few minutes. Your landlord does not need to join.' } satisfies BotJoinInfoOut;
+   }
+diff --git a/functions/src/types/lmmx.contract.ts b/functions/src/types/lmmx.contract.ts
+index 60c5029..0bbf52b 100644
+--- a/functions/src/types/lmmx.contract.ts
++++ b/functions/src/types/lmmx.contract.ts
+@@ -12,7 +12,7 @@
+  * Dates are Africa/Nairobi calendar days "YYYY-MM-DD". User-facing brand: "Lipa Mdogo Mdogo". Internal names keep "lmm"/"lmmx".
+  */
+ 
+-export const LMMX_CONTRACT_VERSION = 2;
++export const LMMX_CONTRACT_VERSION = 3;
+ export const LMMX_REGION = "africa-south1";           // every lmmx_* callable
+ export const LMMX_BRAND = "Lipa Mdogo Mdogo";
+ export const LMMX_TOP_DESK = "COG-0000";
+@@ -53,7 +53,9 @@ export const LMMX = {
+   // security
+   OTP_PREFIX: "LMM", OTP_DIGITS: 4, OTP_TTL_MS: 30 * 60_000, OTP_MAX_ATTEMPTS: 5, OTP_SETUP_TOTAL_ATTEMPTS_MAX: 10,
+   OTP_LOCK_MS: 3_600_000, OTP_RESEND_MAX_PER_HOUR: 3,
+-  CANCEL_PREFIX: "LMC",
++  CANCEL_PREFIX: "LMC", WITHDRAW_PREFIX: "LMW",
++  /** Withdrawals and pay-my-landlord-now requests: the least that can be moved (KES 50), how often, and the quiet hour before a withdrawal is sent (within 24 hours in all cases). */
++  MIN_PAYOUT_MINOR: 5_000, PAYOUT_REQUESTS_PER_DAY: 5, WITHDRAW_HOLD_MS: 60 * 60_000,
+   SETUP_EXPIRY_MS: 72 * 3_600_000,
+   CHANGE_COOLING_OFF_MS: 48 * 3_600_000,
+   CHANGE_DEFER_DAYS_BEFORE_DUE: 3,
+@@ -86,7 +88,7 @@ export type AuditAction =
+   | "tenant_created" | "setup_otp_sent" | "setup_otp_failed" | "setup_confirmed" | "setup_expired" | "recipient_checked" | "recipient_created" | "recipient_reused"
+   | "recipient_review_decided" | "change_requested" | "change_otp_failed" | "change_confirmed" | "change_cancelled" | "change_applied" | "tenant_link" | "due_day_changed"
+   | "plan_changed" | "payment_credited" | "payment_rejected" | "settlement_started" | "settlement_paid" | "settlement_failed" | "refund" | "freeze" | "unfreeze"
+-  | "reassign" | "reveal" | "top_update" | "landlord_matched" | "tamper_detected" | "rate_limited" | "signature_failed" | "audit_verified" | "lead_updated" | "bonus_accrued";
++  | "payout_requested" | "withdraw_requested" | "withdraw_started" | "withdraw_paid" | "reassign" | "reveal" | "top_update" | "landlord_matched" | "tamper_detected" | "rate_limited" | "signature_failed" | "audit_verified" | "lead_updated" | "bonus_accrued";
+ 
+ export type LmmxErrorCode =
+   | "LMMX_E_AUTH" | "LMMX_E_FORBIDDEN" | "LMMX_E_SIG" | "LMMX_E_RATE" | "LMMX_E_VALIDATION" | "LMMX_E_DUPLICATE" | "LMMX_E_NOT_FOUND" | "LMMX_E_OTP_INVALID"
+@@ -128,11 +130,14 @@ export function validIdNumber(type: IdType, v: string): boolean {
+ export const otpText = (code4: string): string => `${LMMX.OTP_PREFIX}${code4}`;
+ export const cancelText = (code4: string): string => `${LMMX.CANCEL_PREFIX}${code4}`;
+ /** Recognises a message that is only an LMMX code (case and spaces forgiven). Anything else returns null. */
+-export function parseLmmxCode(text: unknown): { kind: "otp" | "cancel"; code: string } | null {
+-  const m = /^\s*(LMM|LMC)\s?-?(\d{4})\s*$/i.exec(String(text ?? ""));
+-  return m ? { kind: m[1].toUpperCase() === "LMM" ? "otp" : "cancel", code: m[2] } : null;
++export function parseLmmxCode(text: unknown): { kind: "otp" | "cancel" | "withdraw"; code: string } | null {
++  const m = /^\s*(LMM|LMC|LMW)\s?-?(\d{4})\s*$/i.exec(String(text ?? ""));
++  if (!m) return null;
++  const p = m[1].toUpperCase();
++  return { kind: p === "LMM" ? "otp" : p === "LMC" ? "cancel" : "withdraw", code: m[2] };
+ }
+-export const botConfirmLink = (code4: string): string => `${LMMX_BOT_LINK}?text=${otpText(code4)}`;
++export const withdrawText = (code4: string): string => `${LMMX.WITHDRAW_PREFIX}${code4}`;
++export const botConfirmLink = (code4: string, prefix: "LMM" | "LMW" = "LMM"): string => `${LMMX_BOT_LINK}?text=${prefix}${code4}`;
+ 
+ // ---- dates (Africa/Nairobi, no DST)
+ const EAT = 3 * 3_600_000, DAY = 86_400_000;
+@@ -254,6 +259,9 @@ export const lmmxText = {
+   /** M3 to the LANDLORD when setup completes. */
+   landlord: (p: { tenantFirstName: string; rentMinor: number; dueDay: number; supportPhone: string }) =>
+     fitSms(`Samuhia: ${smsSafe(p.tenantFirstName, 16)} will pay you ${kes(p.rentMinor)} rent monthly via ${LMMX_BRAND}, in small amounts, sent in full on day ${p.dueDay}. Not right? Call ${p.supportPhone}. Collect rent free: ${LMMX_LANDLORD_URL}`),
++  /** M7 to the TENANT: the code that confirms a withdrawal of everything available to their own M-PESA number. */
++  withdraw: (p: { netMinor: number; phone: string; supportPhone: string; code4: string }) =>
++    fitSms(`${LMMX_BRAND}: withdraw ${kes(p.netMinor)} to your M-PESA ${p.phone}. Code ${withdrawText(p.code4)} valid 30 min. Tap to confirm: ${botConfirmLink(p.code4, "LMW")} Not you? Ignore this and call ${p.supportPhone}.`),
+   /** M4 to the TENANT for a change that needs their OTP. */
+   change: (p: { deskCode: string; summary: string; code4: string }) =>
+     fitSms(`${LMMX_BRAND}: desk ${p.deskCode} asks to change ${smsSafe(p.summary, 80)}. Code ${otpText(p.code4)} valid 30 min. Share it only if you agree. Confirm: ${botConfirmLink(p.code4)}`),
+@@ -358,6 +366,8 @@ export interface TenantLinkOut { kinds: ("lmm" | "legacy")[] }
+ export interface TenantSummaryOut {
+   status: TenantStatus; firstName: string; rentMinor: number; dueDay: number; frequency: Frequency; cycle?: CycleView; recipient: RecipientView;
+   suggestedCreditMinor: number; pendingChange?: PendingChangeView; awaitingSetup?: { otpExpiresAt: number; summary: string }; frozen?: boolean; supportPhone: string;
++  /** Rent paid in and not yet sent to the landlord: what a withdrawal or a pay-my-landlord-now request would move. `payoutPending` = a request is already waiting. */
++  availableMinor?: number; withdrawFeeMinor?: number; payoutPending?: boolean;
+ }
+ export interface TenantHistoryIn { cursor?: string }
+ export interface TenantHistoryOut { items: InstalmentView[]; nextCursor?: string }
+@@ -365,6 +375,12 @@ export interface TenantQuoteIn { creditMinor: number }
+ export interface TenantQuoteOut { quoteId: string; expiresAt: number; creditMinor: number; transferReserveMinor: number; serviceFeeMinor: number; collectionAllowanceMinor: number; chargeMinor: number; feesMinor: number; payByDate: string; remainingAfterMinor: number }
+ export interface TenantPayIn { quoteId: string; payerPhone: string }
+ export interface TenantPayOut { reference: string; displayText: string; chargeMinor: number }
++/** A request to pay the landlord everything available now, or to withdraw it to the tenant's own M-PESA. Nobody types an amount: the server takes everything available. Both are processed within 24 hours. */
++export interface PayoutRequestOut { requestedMinor: number; message: string }
++export interface WithdrawStartIn { phone: string }                // must equal the phone on the tenant's account
++export interface WithdrawStartOut { availableMinor: number; feeMinor: number; netMinor: number; otpExpiresAt: number }
++export interface WithdrawConfirmIn { otp: string }                // "LMW4683" or "4683"
++export interface WithdrawConfirmOut { requestedMinor: number; feeMinor: number; netMinor: number; message: string }
+ export interface TenantSetDueDayIn { dueDay: number }
+ export interface TenantSetDueDayOut { dueDay: number; effectiveFromCycleDate: string }
+ export interface TenantSetPlanIn { frequency: Frequency; suggestedCreditMinor?: number }
+@@ -392,14 +408,16 @@ export const BOT_SIG_MAX_AGE_MS = 5 * 60_000;
+ export type BotKind = "standalone" | "legacy" | "none";
+ export interface BotLookupIn extends BotAuth { phone: string; idNumber: string }   // phone = the WhatsApp sender in E.164
+ /** `none` and a phone/ID mismatch return the identical shape (no enumeration). */
+-export interface BotLookupOut { kind: BotKind; standalone?: { firstName: string; rentMinor: number; remainingMinor: number; dueDate: string; payByDate: string; suggestedCreditMinor: number; frozen?: boolean; awaitingSetup?: boolean } }
++export interface BotLookupOut { kind: BotKind; standalone?: { firstName: string; rentMinor: number; remainingMinor: number; dueDate: string; payByDate: string; suggestedCreditMinor: number; frozen?: boolean; awaitingSetup?: boolean; availableMinor?: number; withdrawFeeMinor?: number } }
+ export interface BotQuoteIn extends BotAuth { phone: string; idNumber: string; creditMinor: number }
+ export interface BotQuoteOut extends TenantQuoteOut {}
+ export interface BotPayIn extends BotAuth { phone: string; idNumber: string; quoteId: string; payerPhone: string }
+ export interface BotPayOut extends TenantPayOut {}
+ /** A message that is only LMM#### or LMC#### is sent here, from ANY bot state. The sender's WhatsApp number must equal the tenant's phone on file. */
+ export interface BotConfirmCodeIn extends BotAuth { phone: string; text: string }
+-export interface BotConfirmCodeOut { result: "setup_confirmed" | "change_confirmed" | "change_cancelled" | "invalid" | "expired" | "locked" | "not_found"; summary?: string }
++export interface BotConfirmCodeOut { result: "setup_confirmed" | "change_confirmed" | "change_cancelled" | "withdraw_requested" | "invalid" | "expired" | "locked" | "not_found"; summary?: string }
++export interface BotPayLandlordIn extends BotAuth { phone: string; idNumber: string }
++export interface BotWithdrawStartIn extends BotAuth { phone: string; idNumber: string }   // the WhatsApp number IS the phone on record; the code is texted to it
+ export interface BotJoinInfoIn extends BotAuth { _?: never }
+ export interface BotJoinInfoOut { supportPhones: string[]; text: string }
+ 
+@@ -438,6 +456,9 @@ export interface LmmxCallableMap {
+   lmmx_tenant_pay: { in: TenantPayIn; out: TenantPayOut };
+   lmmx_tenant_setDueDay: { in: TenantSetDueDayIn; out: TenantSetDueDayOut };
+   lmmx_tenant_setPlan: { in: TenantSetPlanIn; out: { ok: boolean } };
++  lmmx_tenant_payLandlord: { in: Record<string, never>; out: PayoutRequestOut };
++  lmmx_tenant_withdrawStart: { in: WithdrawStartIn; out: WithdrawStartOut };
++  lmmx_tenant_withdrawConfirm: { in: WithdrawConfirmIn; out: WithdrawConfirmOut };
+   lmmx_tenant_confirmSetup: { in: TenantConfirmSetupIn; out: { status: "active" } };
+   lmmx_tenant_confirmChange: { in: TenantConfirmChangeIn; out: DeskConfirmChangeOut };
+   lmmx_tenant_cancelChange: { in: TenantCancelChangeIn; out: { ok: boolean } };
+@@ -445,10 +466,12 @@ export interface LmmxCallableMap {
+   lmmx_bot_quote: { in: BotQuoteIn; out: BotQuoteOut };
+   lmmx_bot_pay: { in: BotPayIn; out: BotPayOut };
+   lmmx_bot_confirmCode: { in: BotConfirmCodeIn; out: BotConfirmCodeOut };
++  lmmx_bot_payLandlord: { in: BotPayLandlordIn; out: PayoutRequestOut };
++  lmmx_bot_withdrawStart: { in: BotWithdrawStartIn; out: WithdrawStartOut };
+   lmmx_bot_joinInfo: { in: BotJoinInfoIn; out: BotJoinInfoOut };
+ }
+ export type LmmxCallableName = keyof LmmxCallableMap;
+ export const LMMX_DESK_CALLABLES = ["lmmx_desk_checkRecipient", "lmmx_desk_createTenant", "lmmx_desk_setupStatus", "lmmx_desk_confirmSetup", "lmmx_desk_resendOtp", "lmmx_desk_listTenants", "lmmx_desk_getTenant", "lmmx_desk_requestChange", "lmmx_desk_confirmChange", "lmmx_desk_cancelChange", "lmmx_desk_earnings", "lmmx_desk_preview", "lmmx_desk_pipeline"] as const;
+ export const LMMX_TOP_CALLABLES = ["lmmx_top_reviewQueue", "lmmx_top_reviewDecision", "lmmx_top_freeze", "lmmx_top_unfreeze", "lmmx_top_reassign", "lmmx_top_reveal", "lmmx_top_updateTenant", "lmmx_top_auditList", "lmmx_top_auditVerify", "lmmx_top_leadsList", "lmmx_top_leadGet", "lmmx_top_leadUpdate", "lmmx_top_stats"] as const;
+-export const LMMX_TENANT_CALLABLES = ["lmmx_tenant_link", "lmmx_tenant_summary", "lmmx_tenant_history", "lmmx_tenant_quote", "lmmx_tenant_pay", "lmmx_tenant_setDueDay", "lmmx_tenant_setPlan", "lmmx_tenant_confirmSetup", "lmmx_tenant_confirmChange", "lmmx_tenant_cancelChange"] as const;
+-export const LMMX_BOT_CALLABLES = ["lmmx_bot_lookup", "lmmx_bot_quote", "lmmx_bot_pay", "lmmx_bot_confirmCode", "lmmx_bot_joinInfo"] as const;
++export const LMMX_TENANT_CALLABLES = ["lmmx_tenant_link", "lmmx_tenant_summary", "lmmx_tenant_history", "lmmx_tenant_quote", "lmmx_tenant_pay", "lmmx_tenant_setDueDay", "lmmx_tenant_setPlan", "lmmx_tenant_payLandlord", "lmmx_tenant_withdrawStart", "lmmx_tenant_withdrawConfirm", "lmmx_tenant_confirmSetup", "lmmx_tenant_confirmChange", "lmmx_tenant_cancelChange"] as const;
++export const LMMX_BOT_CALLABLES = ["lmmx_bot_lookup", "lmmx_bot_quote", "lmmx_bot_pay", "lmmx_bot_confirmCode", "lmmx_bot_payLandlord", "lmmx_bot_withdrawStart", "lmmx_bot_joinInfo"] as const;
+diff --git a/functions/src/webhooks/whatsapp-webhook.ts b/functions/src/webhooks/whatsapp-webhook.ts
+index cc62574..1745062 100644
+--- a/functions/src/webhooks/whatsapp-webhook.ts
++++ b/functions/src/webhooks/whatsapp-webhook.ts
+@@ -50,6 +50,9 @@ import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../han
+ import { handleHouseToRent } from '../handlers/house.handler';
+ import {
+   handleLmmxAmount,
++  handleLmmxMoney,
++  handleLmmxLConfirm,
++  handleLmmxWConfirm,
+   handleLmmxConfirm,
+   handleLmmxDone,
+   handleLmmxHome,
+@@ -266,6 +269,15 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
+       case STATE.LMMX_HOME:
+         response = await handleLmmxHome(phone, input, session);
+         break;
++      case STATE.LMMX_MONEY:
++        response = await handleLmmxMoney(phone, input, session);
++        break;
++      case STATE.LMMX_LCONFIRM:
++        response = await handleLmmxLConfirm(phone, input, session);
++        break;
++      case STATE.LMMX_WCONFIRM:
++        response = await handleLmmxWConfirm(phone, input, session);
++        break;
+       case STATE.LMMX_AMOUNT:
+         response = await handleLmmxAmount(phone, input, session);
+         break;
+diff --git a/src/desk/api/lmmxContract.ts b/src/desk/api/lmmxContract.ts
+index 60c5029..0bbf52b 100644
+--- a/src/desk/api/lmmxContract.ts
++++ b/src/desk/api/lmmxContract.ts
+@@ -12,7 +12,7 @@
+  * Dates are Africa/Nairobi calendar days "YYYY-MM-DD". User-facing brand: "Lipa Mdogo Mdogo". Internal names keep "lmm"/"lmmx".
+  */
+ 
+-export const LMMX_CONTRACT_VERSION = 2;
++export const LMMX_CONTRACT_VERSION = 3;
+ export const LMMX_REGION = "africa-south1";           // every lmmx_* callable
+ export const LMMX_BRAND = "Lipa Mdogo Mdogo";
+ export const LMMX_TOP_DESK = "COG-0000";
+@@ -53,7 +53,9 @@ export const LMMX = {
+   // security
+   OTP_PREFIX: "LMM", OTP_DIGITS: 4, OTP_TTL_MS: 30 * 60_000, OTP_MAX_ATTEMPTS: 5, OTP_SETUP_TOTAL_ATTEMPTS_MAX: 10,
+   OTP_LOCK_MS: 3_600_000, OTP_RESEND_MAX_PER_HOUR: 3,
+-  CANCEL_PREFIX: "LMC",
++  CANCEL_PREFIX: "LMC", WITHDRAW_PREFIX: "LMW",
++  /** Withdrawals and pay-my-landlord-now requests: the least that can be moved (KES 50), how often, and the quiet hour before a withdrawal is sent (within 24 hours in all cases). */
++  MIN_PAYOUT_MINOR: 5_000, PAYOUT_REQUESTS_PER_DAY: 5, WITHDRAW_HOLD_MS: 60 * 60_000,
+   SETUP_EXPIRY_MS: 72 * 3_600_000,
+   CHANGE_COOLING_OFF_MS: 48 * 3_600_000,
+   CHANGE_DEFER_DAYS_BEFORE_DUE: 3,
+@@ -86,7 +88,7 @@ export type AuditAction =
+   | "tenant_created" | "setup_otp_sent" | "setup_otp_failed" | "setup_confirmed" | "setup_expired" | "recipient_checked" | "recipient_created" | "recipient_reused"
+   | "recipient_review_decided" | "change_requested" | "change_otp_failed" | "change_confirmed" | "change_cancelled" | "change_applied" | "tenant_link" | "due_day_changed"
+   | "plan_changed" | "payment_credited" | "payment_rejected" | "settlement_started" | "settlement_paid" | "settlement_failed" | "refund" | "freeze" | "unfreeze"
+-  | "reassign" | "reveal" | "top_update" | "landlord_matched" | "tamper_detected" | "rate_limited" | "signature_failed" | "audit_verified" | "lead_updated" | "bonus_accrued";
++  | "payout_requested" | "withdraw_requested" | "withdraw_started" | "withdraw_paid" | "reassign" | "reveal" | "top_update" | "landlord_matched" | "tamper_detected" | "rate_limited" | "signature_failed" | "audit_verified" | "lead_updated" | "bonus_accrued";
+ 
+ export type LmmxErrorCode =
+   | "LMMX_E_AUTH" | "LMMX_E_FORBIDDEN" | "LMMX_E_SIG" | "LMMX_E_RATE" | "LMMX_E_VALIDATION" | "LMMX_E_DUPLICATE" | "LMMX_E_NOT_FOUND" | "LMMX_E_OTP_INVALID"
+@@ -128,11 +130,14 @@ export function validIdNumber(type: IdType, v: string): boolean {
+ export const otpText = (code4: string): string => `${LMMX.OTP_PREFIX}${code4}`;
+ export const cancelText = (code4: string): string => `${LMMX.CANCEL_PREFIX}${code4}`;
+ /** Recognises a message that is only an LMMX code (case and spaces forgiven). Anything else returns null. */
+-export function parseLmmxCode(text: unknown): { kind: "otp" | "cancel"; code: string } | null {
+-  const m = /^\s*(LMM|LMC)\s?-?(\d{4})\s*$/i.exec(String(text ?? ""));
+-  return m ? { kind: m[1].toUpperCase() === "LMM" ? "otp" : "cancel", code: m[2] } : null;
++export function parseLmmxCode(text: unknown): { kind: "otp" | "cancel" | "withdraw"; code: string } | null {
++  const m = /^\s*(LMM|LMC|LMW)\s?-?(\d{4})\s*$/i.exec(String(text ?? ""));
++  if (!m) return null;
++  const p = m[1].toUpperCase();
++  return { kind: p === "LMM" ? "otp" : p === "LMC" ? "cancel" : "withdraw", code: m[2] };
+ }
+-export const botConfirmLink = (code4: string): string => `${LMMX_BOT_LINK}?text=${otpText(code4)}`;
++export const withdrawText = (code4: string): string => `${LMMX.WITHDRAW_PREFIX}${code4}`;
++export const botConfirmLink = (code4: string, prefix: "LMM" | "LMW" = "LMM"): string => `${LMMX_BOT_LINK}?text=${prefix}${code4}`;
+ 
+ // ---- dates (Africa/Nairobi, no DST)
+ const EAT = 3 * 3_600_000, DAY = 86_400_000;
+@@ -254,6 +259,9 @@ export const lmmxText = {
+   /** M3 to the LANDLORD when setup completes. */
+   landlord: (p: { tenantFirstName: string; rentMinor: number; dueDay: number; supportPhone: string }) =>
+     fitSms(`Samuhia: ${smsSafe(p.tenantFirstName, 16)} will pay you ${kes(p.rentMinor)} rent monthly via ${LMMX_BRAND}, in small amounts, sent in full on day ${p.dueDay}. Not right? Call ${p.supportPhone}. Collect rent free: ${LMMX_LANDLORD_URL}`),
++  /** M7 to the TENANT: the code that confirms a withdrawal of everything available to their own M-PESA number. */
++  withdraw: (p: { netMinor: number; phone: string; supportPhone: string; code4: string }) =>
++    fitSms(`${LMMX_BRAND}: withdraw ${kes(p.netMinor)} to your M-PESA ${p.phone}. Code ${withdrawText(p.code4)} valid 30 min. Tap to confirm: ${botConfirmLink(p.code4, "LMW")} Not you? Ignore this and call ${p.supportPhone}.`),
+   /** M4 to the TENANT for a change that needs their OTP. */
+   change: (p: { deskCode: string; summary: string; code4: string }) =>
+     fitSms(`${LMMX_BRAND}: desk ${p.deskCode} asks to change ${smsSafe(p.summary, 80)}. Code ${otpText(p.code4)} valid 30 min. Share it only if you agree. Confirm: ${botConfirmLink(p.code4)}`),
+@@ -358,6 +366,8 @@ export interface TenantLinkOut { kinds: ("lmm" | "legacy")[] }
+ export interface TenantSummaryOut {
+   status: TenantStatus; firstName: string; rentMinor: number; dueDay: number; frequency: Frequency; cycle?: CycleView; recipient: RecipientView;
+   suggestedCreditMinor: number; pendingChange?: PendingChangeView; awaitingSetup?: { otpExpiresAt: number; summary: string }; frozen?: boolean; supportPhone: string;
++  /** Rent paid in and not yet sent to the landlord: what a withdrawal or a pay-my-landlord-now request would move. `payoutPending` = a request is already waiting. */
++  availableMinor?: number; withdrawFeeMinor?: number; payoutPending?: boolean;
+ }
+ export interface TenantHistoryIn { cursor?: string }
+ export interface TenantHistoryOut { items: InstalmentView[]; nextCursor?: string }
+@@ -365,6 +375,12 @@ export interface TenantQuoteIn { creditMinor: number }
+ export interface TenantQuoteOut { quoteId: string; expiresAt: number; creditMinor: number; transferReserveMinor: number; serviceFeeMinor: number; collectionAllowanceMinor: number; chargeMinor: number; feesMinor: number; payByDate: string; remainingAfterMinor: number }
+ export interface TenantPayIn { quoteId: string; payerPhone: string }
+ export interface TenantPayOut { reference: string; displayText: string; chargeMinor: number }
++/** A request to pay the landlord everything available now, or to withdraw it to the tenant's own M-PESA. Nobody types an amount: the server takes everything available. Both are processed within 24 hours. */
++export interface PayoutRequestOut { requestedMinor: number; message: string }
++export interface WithdrawStartIn { phone: string }                // must equal the phone on the tenant's account
++export interface WithdrawStartOut { availableMinor: number; feeMinor: number; netMinor: number; otpExpiresAt: number }
++export interface WithdrawConfirmIn { otp: string }                // "LMW4683" or "4683"
++export interface WithdrawConfirmOut { requestedMinor: number; feeMinor: number; netMinor: number; message: string }
+ export interface TenantSetDueDayIn { dueDay: number }
+ export interface TenantSetDueDayOut { dueDay: number; effectiveFromCycleDate: string }
+ export interface TenantSetPlanIn { frequency: Frequency; suggestedCreditMinor?: number }
+@@ -392,14 +408,16 @@ export const BOT_SIG_MAX_AGE_MS = 5 * 60_000;
+ export type BotKind = "standalone" | "legacy" | "none";
+ export interface BotLookupIn extends BotAuth { phone: string; idNumber: string }   // phone = the WhatsApp sender in E.164
+ /** `none` and a phone/ID mismatch return the identical shape (no enumeration). */
+-export interface BotLookupOut { kind: BotKind; standalone?: { firstName: string; rentMinor: number; remainingMinor: number; dueDate: string; payByDate: string; suggestedCreditMinor: number; frozen?: boolean; awaitingSetup?: boolean } }
++export interface BotLookupOut { kind: BotKind; standalone?: { firstName: string; rentMinor: number; remainingMinor: number; dueDate: string; payByDate: string; suggestedCreditMinor: number; frozen?: boolean; awaitingSetup?: boolean; availableMinor?: number; withdrawFeeMinor?: number } }
+ export interface BotQuoteIn extends BotAuth { phone: string; idNumber: string; creditMinor: number }
+ export interface BotQuoteOut extends TenantQuoteOut {}
+ export interface BotPayIn extends BotAuth { phone: string; idNumber: string; quoteId: string; payerPhone: string }
+ export interface BotPayOut extends TenantPayOut {}
+ /** A message that is only LMM#### or LMC#### is sent here, from ANY bot state. The sender's WhatsApp number must equal the tenant's phone on file. */
+ export interface BotConfirmCodeIn extends BotAuth { phone: string; text: string }
+-export interface BotConfirmCodeOut { result: "setup_confirmed" | "change_confirmed" | "change_cancelled" | "invalid" | "expired" | "locked" | "not_found"; summary?: string }
++export interface BotConfirmCodeOut { result: "setup_confirmed" | "change_confirmed" | "change_cancelled" | "withdraw_requested" | "invalid" | "expired" | "locked" | "not_found"; summary?: string }
++export interface BotPayLandlordIn extends BotAuth { phone: string; idNumber: string }
++export interface BotWithdrawStartIn extends BotAuth { phone: string; idNumber: string }   // the WhatsApp number IS the phone on record; the code is texted to it
+ export interface BotJoinInfoIn extends BotAuth { _?: never }
+ export interface BotJoinInfoOut { supportPhones: string[]; text: string }
+ 
+@@ -438,6 +456,9 @@ export interface LmmxCallableMap {
+   lmmx_tenant_pay: { in: TenantPayIn; out: TenantPayOut };
+   lmmx_tenant_setDueDay: { in: TenantSetDueDayIn; out: TenantSetDueDayOut };
+   lmmx_tenant_setPlan: { in: TenantSetPlanIn; out: { ok: boolean } };
++  lmmx_tenant_payLandlord: { in: Record<string, never>; out: PayoutRequestOut };
++  lmmx_tenant_withdrawStart: { in: WithdrawStartIn; out: WithdrawStartOut };
++  lmmx_tenant_withdrawConfirm: { in: WithdrawConfirmIn; out: WithdrawConfirmOut };
+   lmmx_tenant_confirmSetup: { in: TenantConfirmSetupIn; out: { status: "active" } };
+   lmmx_tenant_confirmChange: { in: TenantConfirmChangeIn; out: DeskConfirmChangeOut };
+   lmmx_tenant_cancelChange: { in: TenantCancelChangeIn; out: { ok: boolean } };
+@@ -445,10 +466,12 @@ export interface LmmxCallableMap {
+   lmmx_bot_quote: { in: BotQuoteIn; out: BotQuoteOut };
+   lmmx_bot_pay: { in: BotPayIn; out: BotPayOut };
+   lmmx_bot_confirmCode: { in: BotConfirmCodeIn; out: BotConfirmCodeOut };
++  lmmx_bot_payLandlord: { in: BotPayLandlordIn; out: PayoutRequestOut };
++  lmmx_bot_withdrawStart: { in: BotWithdrawStartIn; out: WithdrawStartOut };
+   lmmx_bot_joinInfo: { in: BotJoinInfoIn; out: BotJoinInfoOut };
+ }
+ export type LmmxCallableName = keyof LmmxCallableMap;
+ export const LMMX_DESK_CALLABLES = ["lmmx_desk_checkRecipient", "lmmx_desk_createTenant", "lmmx_desk_setupStatus", "lmmx_desk_confirmSetup", "lmmx_desk_resendOtp", "lmmx_desk_listTenants", "lmmx_desk_getTenant", "lmmx_desk_requestChange", "lmmx_desk_confirmChange", "lmmx_desk_cancelChange", "lmmx_desk_earnings", "lmmx_desk_preview", "lmmx_desk_pipeline"] as const;
+ export const LMMX_TOP_CALLABLES = ["lmmx_top_reviewQueue", "lmmx_top_reviewDecision", "lmmx_top_freeze", "lmmx_top_unfreeze", "lmmx_top_reassign", "lmmx_top_reveal", "lmmx_top_updateTenant", "lmmx_top_auditList", "lmmx_top_auditVerify", "lmmx_top_leadsList", "lmmx_top_leadGet", "lmmx_top_leadUpdate", "lmmx_top_stats"] as const;
+-export const LMMX_TENANT_CALLABLES = ["lmmx_tenant_link", "lmmx_tenant_summary", "lmmx_tenant_history", "lmmx_tenant_quote", "lmmx_tenant_pay", "lmmx_tenant_setDueDay", "lmmx_tenant_setPlan", "lmmx_tenant_confirmSetup", "lmmx_tenant_confirmChange", "lmmx_tenant_cancelChange"] as const;
+-export const LMMX_BOT_CALLABLES = ["lmmx_bot_lookup", "lmmx_bot_quote", "lmmx_bot_pay", "lmmx_bot_confirmCode", "lmmx_bot_joinInfo"] as const;
++export const LMMX_TENANT_CALLABLES = ["lmmx_tenant_link", "lmmx_tenant_summary", "lmmx_tenant_history", "lmmx_tenant_quote", "lmmx_tenant_pay", "lmmx_tenant_setDueDay", "lmmx_tenant_setPlan", "lmmx_tenant_payLandlord", "lmmx_tenant_withdrawStart", "lmmx_tenant_withdrawConfirm", "lmmx_tenant_confirmSetup", "lmmx_tenant_confirmChange", "lmmx_tenant_cancelChange"] as const;
++export const LMMX_BOT_CALLABLES = ["lmmx_bot_lookup", "lmmx_bot_quote", "lmmx_bot_pay", "lmmx_bot_confirmCode", "lmmx_bot_payLandlord", "lmmx_bot_withdrawStart", "lmmx_bot_joinInfo"] as const;
+diff --git a/src/desk/modules/lmm-top/logic.ts b/src/desk/modules/lmm-top/logic.ts
+index 428a126..ee9b22d 100644
+--- a/src/desk/modules/lmm-top/logic.ts
++++ b/src/desk/modules/lmm-top/logic.ts
+@@ -41,6 +41,10 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
+   settlement_started: "Payout started", settlement_paid: "Payout paid", settlement_failed: "Payout failed", refund: "Refund", freeze: "Put on hold", unfreeze: "Taken off hold",
+   reassign: "Moved to another desk", reveal: "Full details shown", top_update: "Changed by top desk", landlord_matched: "Landlord matched", tamper_detected: "Tampering detected",
+   rate_limited: "Too many tries", signature_failed: "Bad bot signature", audit_verified: "Audit checked", lead_updated: "Lead updated", bonus_accrued: "Bonus earned",
++ payout_requested: "Tenant asked to pay landlord now",
++ withdraw_started: "Withdrawal code sent",
++ withdraw_requested: "Withdrawal requested",
++ withdraw_paid: "Withdrawal sent",
+ };
+ export const AUDIT_ACTIONS = Object.keys(AUDIT_ACTION_LABELS) as AuditAction[];
+ 
+diff --git a/tests/desk-ui/top-no-otp.test.ts b/tests/desk-ui/top-no-otp.test.ts
+index 144fbf4..dadb7d5 100644
+--- a/tests/desk-ui/top-no-otp.test.ts
++++ b/tests/desk-ui/top-no-otp.test.ts
+@@ -20,7 +20,7 @@ test("the top-desk change copy says no code and no waiting; the regular copy sti
+   assert.match(S.change.topCopy.join(" "), /No tenant code and no waiting period/);
+   assert.match(S.change.payoutCopy.join(" "), /code/); assert.match(S.change.payoutCopy.join(" "), /48 hours/);
+ });
+-test("the two DESK copies of the LMMX contract are identical and are version 2", () => {
+-  assert.equal(LMMX_CONTRACT_VERSION, 2);
++test("the two DESK copies of the LMMX contract are identical and are version 3", () => {
++  assert.equal(LMMX_CONTRACT_VERSION, 3);
+   assert.equal(readFileSync("src/desk/api/lmmxContract.ts", "utf8"), readFileSync("functions/src/types/lmmx.contract.ts", "utf8"));
+ });
