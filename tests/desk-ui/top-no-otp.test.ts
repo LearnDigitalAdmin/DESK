@@ -20,7 +20,7 @@ test("the top-desk change copy says no code and no waiting; the regular copy sti
   assert.match(S.change.topCopy.join(" "), /No tenant code and no waiting period/);
   assert.match(S.change.payoutCopy.join(" "), /code/); assert.match(S.change.payoutCopy.join(" "), /48 hours/);
 });
-test("the two DESK copies of the LMMX contract are identical and are version 2", () => {
-  assert.equal(LMMX_CONTRACT_VERSION, 2);
+test("the two DESK copies of the LMMX contract are identical and are version 3", () => {
+  assert.equal(LMMX_CONTRACT_VERSION, 3);
   assert.equal(readFileSync("src/desk/api/lmmxContract.ts", "utf8"), readFileSync("functions/src/types/lmmx.contract.ts", "utf8"));
 });

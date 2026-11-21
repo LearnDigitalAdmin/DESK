@@ -17,6 +17,10 @@ export const LMMX_LABELS = {
   CHECK: { en: 'Check balance', sw: 'Angalia salio' },
   PAY_MORE: { en: 'Pay more', sw: 'Lipa zaidi' },
   PAY_AMOUNT: { en: 'Pay {amount}', sw: 'Lipa {amount}' },
+  MONEY: { en: 'My money', sw: 'Pesa zangu' },
+  PAY_LANDLORD: { en: 'Pay landlord now', sw: 'Lipa mwenye nyumba' },
+  WITHDRAW: { en: 'Withdraw', sw: 'Toa pesa' },
+  SEND_CODE: { en: 'Send me a code', sw: 'Nitumie msimbo' },
 } satisfies Record<string, Bi>;
 
 export type LmmxLabelKey = keyof typeof LMMX_LABELS;
@@ -126,6 +130,38 @@ export const LMMX_MESSAGES = {
   JOIN_DEFAULT_TEXT: {
     en: 'Pay your rent in small amounts, at your own pace. Your landlord does not need to join.',
     sw: 'Lipa kodi yako kwa awamu ndogo, kwa kasi yako. Mwenye nyumba hahitaji kujiunga.',
+  },
+  MONEY: {
+    en: '*My money* 💰\n\nYou have *{avail}* paid in that has not gone to your landlord yet.\n\n• *Pay landlord now*: we send all of it to your landlord within 24 hours.\n• *Withdraw*: we send {net} to your M-PESA (after a {fee} fee), within 24 hours.\n\nYou do not type an amount. We move everything you have here.',
+    sw: '*Pesa zangu* 💰\n\nUna *{avail}* ulizolipa ambazo bado hazijaenda kwa mwenye nyumba.\n\n• *Lipa mwenye nyumba*: tunamtumia zote ndani ya saa 24.\n• *Toa pesa*: tunakutumia {net} kwenye M-PESA yako (baada ya ada ya {fee}), ndani ya saa 24.\n\nHuandiki kiasi. Tunahamisha zote ulizo nazo hapa.',
+  },
+  MONEY_NONE: {
+    en: '*My money* 💰\n\nYou have {avail} paid in. You need at least {min} to pay your landlord early or to withdraw.',
+    sw: '*Pesa zangu* 💰\n\nUna {avail} ulizolipa. Unahitaji angalau {min} ili umlipe mwenye nyumba mapema au utoe pesa.',
+  },
+  MONEY_PENDING: {
+    en: 'A request is already on its way. It will be done within 24 hours.',
+    sw: 'Ombi lipo njiani tayari. Litakamilika ndani ya saa 24.',
+  },
+  LCONFIRM: {
+    en: 'Send *{avail}* to your landlord now? It goes to the landlord account on record, within 24 hours.',
+    sw: 'Mtumie mwenye nyumba *{avail}* sasa? Inaenda kwenye akaunti yake iliyosajiliwa, ndani ya saa 24.',
+  },
+  LDONE: {
+    en: '✅ {message}',
+    sw: '✅ {message}',
+  },
+  WCONFIRM: {
+    en: 'Withdraw *{avail}* to your M-PESA *{phone}*?\n\nAfter the {fee} fee you get *{net}*. It goes only to this number. We will text a code to it first.',
+    sw: 'Toa *{avail}* kwenda M-PESA yako *{phone}*?\n\nBaada ya ada ya {fee} unapata *{net}*. Inaenda kwa namba hii tu. Kwanza tutatuma msimbo kwa namba hii.',
+  },
+  WCODE_SENT: {
+    en: '📲 We texted a code to *{phone}*, like *LMW1234*.\n\nSend that code here as a message (or tap the link in the SMS). It lasts 30 minutes. Never share it with anyone else.',
+    sw: '📲 Tumetuma msimbo kwa *{phone}*, kama *LMW1234*.\n\nTuma msimbo huo hapa kama ujumbe (au bonyeza kiungo kwenye SMS). Unadumu dakika 30. Usimpe mtu mwingine.',
+  },
+  CODE_WD_OK: {
+    en: '✅ *Withdrawal requested.*\n\n{summary} will be sent to your M-PESA within 24 hours. We will text you when it is sent.\n\nIf you did not ask for this, contact support on {phone} at once.',
+    sw: '✅ *Ombi la kutoa pesa limepokelewa.*\n\n{summary} itatumwa kwenye M-PESA yako ndani ya saa 24. Tutakutumia SMS ikitumwa.\n\nUsipoomba hili, wasiliana na msaada kwa {phone} mara moja.',
   },
   CODE_SETUP_OK: {
     en: '✅ *Lipa Mdogo Mdogo is on!*\n\nYour sign-up is confirmed.{summary}\n\nNext: type *#*, then choose *Lipa Mdogo Mdogo* to pay your rent in small amounts.',

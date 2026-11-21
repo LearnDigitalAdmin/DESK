@@ -18,6 +18,8 @@ import {
   BotQuoteOut,
   LmmxCallableMap,
   LmmxErrorCode,
+  PayoutRequestOut,
+  WithdrawStartOut,
   botSigMessage,
   normalizeKePhone,
   parseLmmxCode,
@@ -28,7 +30,7 @@ const BASE = process.env.PAY_FUNCTIONS_BASE || 'https://africa-south1-plot-9fd6e
 /** A signed call is valid for 5 minutes, so a call that has not answered in 25 seconds is treated as unknown, not as failed. */
 const TIMEOUT_MS = 25_000;
 
-export type BotOp = 'lmmx_bot_lookup' | 'lmmx_bot_quote' | 'lmmx_bot_pay' | 'lmmx_bot_confirmCode' | 'lmmx_bot_joinInfo';
+export type BotOp = 'lmmx_bot_lookup' | 'lmmx_bot_quote' | 'lmmx_bot_pay' | 'lmmx_bot_confirmCode' | 'lmmx_bot_payLandlord' | 'lmmx_bot_withdrawStart' | 'lmmx_bot_joinInfo';
 type Payload<K extends BotOp> = Omit<LmmxCallableMap[K]['in'], keyof BotAuth>;
 
 /** `code` is PAY's `details.lmmx` when it sent one; `timeout` means we do not know whether PAY did the work. */
@@ -72,6 +74,10 @@ export const quote = (phone: string, idNumber: string, creditMinor: number): Pro
 export const pay = (phone: string, idNumber: string, quoteId: string, payerPhone: string): Promise<BotPayOut> =>
   call('lmmx_bot_pay', { phone, idNumber, quoteId, payerPhone });
 export const confirmCode = (phone: string, text: string): Promise<BotConfirmCodeOut> => call('lmmx_bot_confirmCode', { phone, text });
+/** Pay the landlord everything available now (no amount typed; PAY decides). */
+export const payLandlord = (phone: string, idNumber: string): Promise<PayoutRequestOut> => call('lmmx_bot_payLandlord', { phone, idNumber });
+/** Starts a withdrawal: PAY texts a code (LMW1234) to the phone on record, which IS this WhatsApp number. The code comes back here as a normal message. */
+export const withdrawStart = (phone: string, idNumber: string): Promise<WithdrawStartOut> => call('lmmx_bot_withdrawStart', { phone, idNumber });
 export const joinInfo = (): Promise<BotJoinInfoOut> => call('lmmx_bot_joinInfo', {});
 
 // ── Mock mode ────────────────────────────────────────────────────────────
@@ -88,7 +94,8 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
   switch (op) {
     case 'lmmx_bot_lookup': {
       const id = String(p.idNumber);
-      const standalone = { firstName: 'Mary', rentMinor: MOCK_RENT, remainingMinor: MOCK_REMAINING, dueDate: '2026-12-05', payByDate: '2026-12-02', suggestedCreditMinor: 250_000 };
+      const standalone = { firstName: 'Mary', rentMinor: MOCK_RENT, remainingMinor: MOCK_REMAINING, dueDate: '2026-12-05', payByDate: '2026-12-02', suggestedCreditMinor: 250_000, availableMinor: 400_000, withdrawFeeMinor: 2_900 };
+      if (id === '55555555') return { kind: 'standalone', standalone: { ...standalone, availableMinor: 3_000, withdrawFeeMinor: 0 } } satisfies BotLookupOut;
       if (id === '11111111') return { kind: 'standalone', standalone } satisfies BotLookupOut;
       if (id === '22222222') return { kind: 'legacy' } satisfies BotLookupOut;
       if (id === '33333333') return { kind: 'standalone', standalone: { ...standalone, frozen: true } } satisfies BotLookupOut;
@@ -122,7 +129,7 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
     }
     case 'lmmx_bot_confirmCode': {
       const parsed = parseLmmxCode(p.text);
-      const full = parsed ? `${parsed.kind === 'otp' ? 'LMM' : 'LMC'}${parsed.code}` : '';
+      const full = parsed ? `${parsed.kind === 'otp' ? 'LMM' : parsed.kind === 'cancel' ? 'LMC' : 'LMW'}${parsed.code}` : '';
       const phoneOk = normalizeKePhone(p.phone) !== null;
       if (!parsed || !phoneOk) return { result: 'invalid' } satisfies BotConfirmCodeOut;
       switch (full) {
@@ -131,9 +138,18 @@ function mockCall(op: BotOp, p: Record<string, unknown>): unknown {
         case 'LMC4683': return { result: 'change_cancelled' } satisfies BotConfirmCodeOut;
         case 'LMM0000': return { result: 'expired' } satisfies BotConfirmCodeOut;
         case 'LMM9999': return { result: 'locked' } satisfies BotConfirmCodeOut;
+        case 'LMW4683': return { result: 'withdraw_requested', summary: 'KES 3,971' } satisfies BotConfirmCodeOut;
         case 'LMM2222': return { result: 'not_found' } satisfies BotConfirmCodeOut;
         default: return { result: 'invalid' } satisfies BotConfirmCodeOut;
       }
+    }
+    case 'lmmx_bot_payLandlord': {
+      if (String(p.idNumber) === '66666666') throw new LmmxBotError('too little', 'LMMX_E_AMOUNT');
+      return { requestedMinor: 400_000, message: 'Request received. KES 4,000 will be sent to your landlord within 24 hours.' } satisfies PayoutRequestOut;
+    }
+    case 'lmmx_bot_withdrawStart': {
+      if (String(p.idNumber) === '66666666') throw new LmmxBotError('too little', 'LMMX_E_AMOUNT');
+      return { availableMinor: 400_000, feeMinor: 2_900, netMinor: 397_100, otpExpiresAt: Date.now() + 30 * 60_000 } satisfies WithdrawStartOut;
     }
     case 'lmmx_bot_joinInfo':
       return { supportPhones: ['0791286165', '0101716473'], text: 'Samuhia sets you up at a desk in a few minutes. Your landlord does not need to join.' } satisfies BotJoinInfoOut;

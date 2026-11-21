@@ -65,7 +65,7 @@ const homeScreen = (lang: Lang, s: NonNullable<BotLookupOut['standalone']>): Out
       due: shortDate(s.dueDate),
       payby: shortDate(s.payByDate),
     }),
-    [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('0', ulabel('BACK', lang)), mainButton(lang)]
+    [btn('PAYNOW', ulabel('PAY_NOW', lang)), btn('MONEY', lmxl('MONEY', lang)), mainButton(lang)]
   );
 
 const amountScreen = (lang: Lang, suggestedMinor: number): Outbound =>
@@ -87,6 +87,30 @@ const phoneScreen = (lang: Lang, q: SavedQuote, sender: string | null): Outbound
 
 const confirmScreen = (lang: Lang, q: SavedQuote, payer: string): Outbound =>
   uiButtons(quoteLines(lang, q, 'CONFIRM', payer), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
+
+// ── My money: pay the landlord now / withdraw (no amount typed; PAY takes everything available, at least KES 50) ──
+
+const MIN_PAYOUT = LMMX.MIN_PAYOUT_MINOR;
+async function moneyScreen(phone: string, session: Session, notice?: string): Promise<Reply> {
+  const lang = session.language;
+  const id = ctxId(session);
+  const sender = normalizeKePhone(phone);
+  if (!id || !sender) return beginLmmx(phone, session);
+  try {
+    const out = await lmmx.lookup(sender, id);
+    const s = out.kind === 'standalone' ? out.standalone : undefined;
+    if (!s) return afterLookup(phone, session, id, out);
+    if (s.frozen || s.awaitingSetup) return afterLookup(phone, session, id, out);
+    const avail = s.availableMinor ?? 0;
+    const fee = s.withdrawFeeMinor ?? 0;
+    await updateSessionState(phone, STATE.LMMX_MONEY, {});
+    const text = avail >= MIN_PAYOUT ? lmxm('MONEY', lang, { avail: kes(avail), fee: kes(fee), net: kes(avail - fee) }) : lmxm('MONEY_NONE', lang, { avail: kes(avail), min: kes(MIN_PAYOUT) });
+    const buttons = avail >= MIN_PAYOUT ? [btn('PAYLORD', lmxl('PAY_LANDLORD', lang)), btn('WITHDRAW', lmxl('WITHDRAW', lang)), back(lang)] : [back(lang), mainButton(lang)];
+    return uiButtons(notice ? `${notice}\n\n${text}` : text, buttons);
+  } catch (err) {
+    return lookupFailed(phone, session, err);
+  }
+}
 
 const afterPayButtons = (lang: Lang) => [btn('CHECK', lmxl('CHECK', lang)), btn('PAYNOW', lmxl('PAY_MORE', lang)), mainButton(lang)];
 
@@ -211,8 +235,12 @@ async function navigate(phone: string, input: string, session: Session): Promise
     case STATE.LMMX_NOTFOUND:
       return beginLmmx(phone, session);
     case STATE.LMMX_AMOUNT:
+    case STATE.LMMX_MONEY:
     case STATE.LMMX_DONE:
       return refreshHome(phone, session);
+    case STATE.LMMX_LCONFIRM:
+    case STATE.LMMX_WCONFIRM:
+      return moneyScreen(phone, session);
     case STATE.LMMX_PHONE:
       await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
       return amountScreen(lang, Number(session.context?.lmxSug ?? 0));
@@ -270,7 +298,77 @@ export async function handleLmmxHome(phone: string, input: string, session: Sess
     await updateSessionState(phone, STATE.LMMX_AMOUNT, {});
     return amountScreen(session.language, Number(session.context?.lmxSug ?? 0));
   }
+  if (input.trim().toUpperCase() === 'MONEY') return moneyScreen(phone, session);
   return refreshHome(phone, session);
+}
+
+/** My money: Pay landlord now, or Withdraw. */
+export async function handleLmmxMoney(phone: string, input: string, session: Session): Promise<Reply> {
+  const nav = await navigate(phone, input, session);
+  if (nav) return nav;
+  const lang = session.language;
+  const choice = input.trim().toUpperCase();
+  if (choice !== 'PAYLORD' && choice !== 'WITHDRAW') return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
+  const id = ctxId(session);
+  const sender = normalizeKePhone(phone);
+  if (!id || !sender) return beginLmmx(phone, session);
+  try {
+    const out = await lmmx.lookup(sender, id);
+    const s = out.kind === 'standalone' ? out.standalone : undefined;
+    if (!s || s.frozen || s.awaitingSetup || (s.availableMinor ?? 0) < MIN_PAYOUT) return moneyScreen(phone, session);
+    const avail = s.availableMinor ?? 0;
+    const fee = s.withdrawFeeMinor ?? 0;
+    if (choice === 'PAYLORD') {
+      await updateSessionState(phone, STATE.LMMX_LCONFIRM, {});
+      return uiButtons(lmxm('LCONFIRM', lang, { avail: kes(avail) }), [btn('YES', ulabel('CONFIRM', lang)), back(lang), mainButton(lang)]);
+    }
+    await updateSessionState(phone, STATE.LMMX_WCONFIRM, {});
+    return uiButtons(lmxm('WCONFIRM', lang, { avail: kes(avail), fee: kes(fee), net: kes(avail - fee), phone: localPhone(sender) }), [btn('YES', lmxl('SEND_CODE', lang)), back(lang), mainButton(lang)]);
+  } catch (err) {
+    return lookupFailed(phone, session, err);
+  }
+}
+
+const isYes = (input: string): boolean => ['YES', 'NDIO', 'CONFIRM', 'THIBITISHA'].includes(input.trim().toUpperCase());
+
+/** Confirm: pay my landlord now. */
+export async function handleLmmxLConfirm(phone: string, input: string, session: Session): Promise<Reply> {
+  const nav = await navigate(phone, input, session);
+  if (nav) return nav;
+  const lang = session.language;
+  const id = ctxId(session);
+  const sender = normalizeKePhone(phone);
+  if (!id || !sender) return beginLmmx(phone, session);
+  if (!isYes(input)) return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
+  try {
+    const r = await lmmx.payLandlord(sender, id);
+    await updateSessionState(phone, STATE.LMMX_DONE, {});
+    return uiButtons(lmxm('LDONE', lang, { message: r.message.slice(0, 300) }), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
+  } catch (err) {
+    logFail('payLandlord', err);
+    await updateSessionState(phone, STATE.LMMX_DONE, {});
+    return uiButtons(lmxm(errorKey(err), lang), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
+  }
+}
+
+/** Confirm: withdraw. Sends the code to the phone on record; the tenant replies LMW#### here (any state) or taps the SMS link. */
+export async function handleLmmxWConfirm(phone: string, input: string, session: Session): Promise<Reply> {
+  const nav = await navigate(phone, input, session);
+  if (nav) return nav;
+  const lang = session.language;
+  const id = ctxId(session);
+  const sender = normalizeKePhone(phone);
+  if (!id || !sender) return beginLmmx(phone, session);
+  if (!isYes(input)) return moneyScreen(phone, session, lmxm('BAD_CHOICE', lang));
+  try {
+    await lmmx.withdrawStart(sender, id);
+    await updateSessionState(phone, STATE.LMMX_DONE, {});
+    return uiButtons(lmxm('WCODE_SENT', lang, { phone: localPhone(sender) }), [mainButton(lang)]);
+  } catch (err) {
+    logFail('withdrawStart', err);
+    await updateSessionState(phone, STATE.LMMX_DONE, {});
+    return uiButtons(lmxm(errorKey(err), lang), [btn('CHECK', lmxl('CHECK', lang)), mainButton(lang)]);
+  }
 }
 
 /** After a payment attempt, or a frozen / awaiting-setup answer: Check balance, Pay more, or leave. */
@@ -388,6 +486,7 @@ export async function lmmxCodeReply(phone: string, text: string, lang: Lang): Pr
     switch (r.result) {
       case 'setup_confirmed': return uiText(lmxm('CODE_SETUP_OK', lang, { summary: summaryOf(r) }));
       case 'change_confirmed': return uiText(lmxm('CODE_CHANGE_OK', lang, { summary: summaryOf(r) }));
+      case 'withdraw_requested': return uiText(lmxm('CODE_WD_OK', lang, { summary: (r.summary ?? 'Your money').replace(/\s+/g, ' ').trim().slice(0, 60), phone: LMMX_SUPPORT_PHONE }));
       case 'change_cancelled': return uiText(lmxm('CODE_CANCELLED', lang));
       case 'expired': return uiText(lmxm('CODE_EXPIRED', lang));
       case 'locked': return uiText(lmxm('CODE_LOCKED', lang));

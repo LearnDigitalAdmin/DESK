@@ -127,6 +127,46 @@ describe('main menu routing', () => {
   });
 });
 
+describe('my money: pay landlord now and withdraw (no amount typed, no account settings)', () => {
+  const enter = async (id: string, lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say(id); return r; };
+  test('the home screen has My money; it shows everything available and what a withdrawal nets after the fee', async () => {
+    const r = await enter('11111111'); await r.tap('My money');
+    assert.equal(r.state, STATE.LMMX_MONEY); assert.match(r.body(), /KES 4,000/); assert.match(r.body(), /KES 3,971/); assert.match(r.body(), /KES 29/); assert.match(r.body(), /within 24 hours/);
+    assert.deepEqual(r.titles(), ['Pay landlord now', 'Withdraw', 'Back']); assert.doesNotMatch(r.body(), /enter an amount|how much/i);
+  });
+  test('Pay landlord now: confirm, then it is requested (the server decides the amount and the timing)', async () => {
+    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Pay landlord now');
+    assert.equal(r.state, STATE.LMMX_LCONFIRM); assert.match(r.body(), /KES 4,000/);
+    await r.tap('Confirm'); assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /within 24 hours/);
+  });
+  test('Withdraw: confirm shows the fee and net and that it goes only to this number; a code is texted; the LMW code works from anywhere', async () => {
+    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Withdraw');
+    assert.equal(r.state, STATE.LMMX_WCONFIRM); assert.match(r.body(), /0712345678/); assert.match(r.body(), /KES 29/); assert.match(r.body(), /KES 3,971/); assert.match(r.body(), /only to this number/);
+    await r.tap('Send me a code'); assert.equal(r.state, STATE.LMMX_DONE); assert.match(r.body(), /LMW1234/); assert.match(r.body(), /0712345678/);
+    const before = r.state; await r.say('LMW4683');
+    assert.match(r.allText(), /Withdrawal requested/); assert.match(r.allText(), /KES 3,971/); assert.equal(r.state, before, 'the session is not moved by the code');
+    await r.say('lmw 0000'); assert.match(r.allText(), /not right|expired|match|locked|check that code/i);
+  });
+  test('below KES 50 there is nothing to move and no buttons to do it', async () => {
+    const r = await enter('55555555'); await r.tap('My money');
+    assert.equal(r.state, STATE.LMMX_MONEY); assert.match(r.body(), /at least KES 50/); assert.deepEqual(r.titles(), ['Back', 'Main menu']);
+  });
+  test('Back from the confirm screens returns to My money, and from My money to the home screen', async () => {
+    const r = await enter('11111111'); await r.tap('My money'); await r.tap('Withdraw'); await r.tap('Back');
+    assert.equal(r.state, STATE.LMMX_MONEY); await r.tap('Back'); assert.equal(r.state, STATE.LMMX_HOME);
+  });
+  test('Swahili works end to end', async () => {
+    const r = await enter('11111111', 'sw'); await r.tap('Pesa zangu'); assert.equal(r.state, STATE.LMMX_MONEY); assert.deepEqual(r.titles().slice(0, 2), ['Lipa mwenye nyumba', 'Toa pesa']); assert.equal(r.titles().length, 3);
+    await r.tap('Toa pesa'); await r.tap('Nitumie msimbo'); assert.match(r.body(), /LMW1234/); await r.say('LMW4683'); assert.match(r.allText(), /Ombi la kutoa pesa limepokelewa/);
+  });
+  test('a payout error from PAY is explained, never a crash; the bot has no account-settings states', async () => {
+    const orig = client.payLandlord; (client as any).payLandlord = async () => { throw new LmmxBotError('too little', 'LMMX_E_AMOUNT'); };
+    try { const r = await enter('11111111'); await r.tap('My money'); await r.tap('Pay landlord now'); await r.tap('Confirm'); assert.equal(r.state, STATE.LMMX_DONE); assert.ok(r.body().length > 10); }
+    finally { (client as any).payLandlord = orig; }
+    assert.deepEqual(Object.values(STATE).filter((s) => /SETTING|PROFILE|NAME|CHANGE|DUE_?DAY|PLAN/i.test(String(s)) && /LMMX/.test(String(s))), []);
+  });
+});
+
 describe('lookup results', () => {
   const enter = async (id: string, lang: 'en' | 'sw' = 'en') => { const r = MENU(lang); await r.say('9'); await r.say(id); return r; };
   test('standalone: status with rent, balance, due and pay-by dates', async () => {
@@ -134,7 +174,7 @@ describe('lookup results', () => {
     assert.equal(r.state, STATE.LMMX_HOME);
     assert.match(r.body(), /Hello Mary/); assert.match(r.body(), /KES 10,000/); assert.match(r.body(), /KES 7,500/); assert.match(r.body(), /5 Dec/); assert.match(r.body(), /2 Dec/);
     assert.match(r.body(), /Pay by 2 Dec so your landlord gets all of it on 5 Dec/);
-    assert.deepEqual(r.titles(), ['Pay now', 'Back', 'Main menu']);
+    assert.deepEqual(r.titles(), ['Pay now', 'My money', 'Main menu']);
   });
   test('none (also a phone and ID mismatch): friendly not-found with three ways forward', async () => {
     const r = await enter('99999999');
@@ -273,7 +313,7 @@ describe('copy', () => {
   });
   test('every new key resolves through lmxm and lmxl in both languages, with no unfilled placeholder but the documented ones', () => {
     for (const lang of LANGS) {
-      for (const k of Object.keys(LMMX_MESSAGES)) assert.doesNotMatch(lmxm(k as any, lang, { text: 't', phones: 'p', name: 'n', rent: 'r', balance: 'b', due: 'd', payby: 'p', min: '1', max: '2', suggested: 's', credit: 'c', fees: 'f', charge: 'g', phone: '0', summary: '' }), /\{\w+\}/, k);
+      for (const k of Object.keys(LMMX_MESSAGES)) assert.doesNotMatch(lmxm(k as any, lang, { text: 't', phones: 'p', name: 'n', rent: 'r', balance: 'b', due: 'd', payby: 'p', min: '1', max: '2', suggested: 's', credit: 'c', fees: 'f', charge: 'g', phone: '0', summary: '', avail: 'a', net: 'n', fee: 'f', message: 'm' }), /\{\w+\}/, k);
       for (const k of Object.keys(LMMX_LABELS)) assert.ok(lmxl(k as any, lang, { amount: 'KES 1,250,000,000' }).length <= 20, k);
     }
   });

@@ -50,6 +50,9 @@ import { handleWatchMessage, handleStaleWatchTap, isWatchButtonId } from '../han
 import { handleHouseToRent } from '../handlers/house.handler';
 import {
   handleLmmxAmount,
+  handleLmmxMoney,
+  handleLmmxLConfirm,
+  handleLmmxWConfirm,
   handleLmmxConfirm,
   handleLmmxDone,
   handleLmmxHome,
@@ -265,6 +268,15 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
         break;
       case STATE.LMMX_HOME:
         response = await handleLmmxHome(phone, input, session);
+        break;
+      case STATE.LMMX_MONEY:
+        response = await handleLmmxMoney(phone, input, session);
+        break;
+      case STATE.LMMX_LCONFIRM:
+        response = await handleLmmxLConfirm(phone, input, session);
+        break;
+      case STATE.LMMX_WCONFIRM:
+        response = await handleLmmxWConfirm(phone, input, session);
         break;
       case STATE.LMMX_AMOUNT:
         response = await handleLmmxAmount(phone, input, session);

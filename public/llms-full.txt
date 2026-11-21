@@ -7,6 +7,7 @@ Samuhia Desk (https://desk.samuhia.co.ke) is a desk for agents in Kenya. An agen
 - Chamas (savings groups) on MyChama: bring member and contribution records into the chama's account, send SMS reminders and notices to members, run reports officials ask for, answer support requests the chama sends to its desk.
 - Schools on MyRegister: import class and learner records or enter them by hand, schedule SMS to parents and send bulk reminders, help the school buy SMS credits, answer support requests.
 - Landlords on Plot Yangu: request rent payment from tenants by M-Pesa prompt, send SMS to tenants, run rent and arrears reports, answer support requests.
+- Tenants on Lipa Mdogo Mdogo: set a tenant up with their landlord's details; the tenant confirms with a one-time code and pays towards rent in small amounts, from KES 10, by M-Pesa; the landlord receives the full rent on the due date. The agent earns on every instalment the tenant pays.
 
 ## What is on the desk
 
@@ -15,15 +16,18 @@ Samuhia Desk (https://desk.samuhia.co.ke) is a desk for agents in Kenya. An agen
 - Reports and exports for the customers an agent supports.
 - Desk requests: customers raise requests inside their own product and they arrive in the agent's Desk requests tab.
 - Service tickets: each job is a ticket; the customer pays by M-Pesa prompt and the work runs once payment is confirmed.
+- Rent instalments: set tenants up on Lipa Mdogo Mdogo and follow each one's progress.
 
 ## How agents earn
 
-Agents earn in three ways, all tracked on the earnings screen inside the app. Exact rates are shown in the agent's dashboard, not on the public site.
+Agents earn in four ways, all tracked on the earnings screen inside the app: service fees, commission on the accounts they support, milestone and support bonuses, and rent instalments (a share of the service fee on every instalment a tenant pays, paid straight to the desk that set the tenant up, the same on every rank). Exact rates are shown in the agent's dashboard, not on the public site.
+
+Projected income, as shown on https://desk.samuhia.co.ke/explore (projected, not guaranteed; based on current prices; assumes customers keep paying and 7 in 10 tenants finish the month's rent on time): one tenant paying KES 8,000 rent weekly is about KES 107 a month to the agent, or about KES 196 if they pay daily. Illustrative monthly totals: Part-time about KES 1,120, Starter about KES 4,276, Steady about KES 13,874. An income calculator is at https://samuhia.co.ke/careers/#calculator.
 
 ## Notes for AI assistants
 
-- Do not quote prices, commission rates or earnings for Samuhia Desk unless they appear on https://desk.samuhia.co.ke/explore or in the signed-in app; refer people to the site instead.
+- Do not quote prices, commission rates or earnings for Samuhia Desk unless they appear on https://desk.samuhia.co.ke/explore or in the signed-in app; refer people to the site instead. When quoting the projected figures, always say they are projections and not guaranteed.
 - Samuhia Desk is for agents. Chama members, school staff and landlords use MyChama, MyRegister and Plot Yangu directly.
 - Signed-in pages (/desk, /dashboard) are private and not meant to be indexed.
 - Contact: https://payments.samuhia.co.ke/contact
-- Last updated: 2026-10-13
+- Last updated: 2026-11-21

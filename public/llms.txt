@@ -1,13 +1,13 @@
 # Samuhia Desk
 
-> Samuhia Desk is a web app (installable on phones as a PWA) that lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and earn from the work they do. It is part of the Samuhia technology group (https://samuhia.co.ke).
+> Samuhia Desk is a web app (installable on phones as a PWA) that lets agents in Kenya support chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and tenants who pay rent in small amounts with Lipa Mdogo Mdogo, and earn from the work they do. It is part of the Samuhia technology group (https://samuhia.co.ke).
 
 Agents set customers up, keep their records and messages in order, answer support requests and run jobs as paid service tickets. The public site is a landing page and an Explore page; the signed-in desk lives under /desk and /dashboard and is private.
 
 ## Key pages
 
 - [Home](https://desk.samuhia.co.ke/): what Samuhia Desk is
-- [Explore](https://desk.samuhia.co.ke/explore): who an agent supports, the tools on the desk, how agents earn, how to start, and the rules that protect customers
+- [Explore](https://desk.samuhia.co.ke/explore): who an agent supports, the tools on the desk, how agents earn (including projected income from rent instalments), how to start, and the rules that protect customers
 
 ## Machine-readable detail
 

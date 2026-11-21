@@ -41,6 +41,10 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   settlement_started: "Payout started", settlement_paid: "Payout paid", settlement_failed: "Payout failed", refund: "Refund", freeze: "Put on hold", unfreeze: "Taken off hold",
   reassign: "Moved to another desk", reveal: "Full details shown", top_update: "Changed by top desk", landlord_matched: "Landlord matched", tamper_detected: "Tampering detected",
   rate_limited: "Too many tries", signature_failed: "Bad bot signature", audit_verified: "Audit checked", lead_updated: "Lead updated", bonus_accrued: "Bonus earned",
+ payout_requested: "Tenant asked to pay landlord now",
+ withdraw_started: "Withdrawal code sent",
+ withdraw_requested: "Withdrawal requested",
+ withdraw_paid: "Withdrawal sent",
 };
 export const AUDIT_ACTIONS = Object.keys(AUDIT_ACTION_LABELS) as AuditAction[];
 

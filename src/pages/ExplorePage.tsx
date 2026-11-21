@@ -18,7 +18,9 @@ import {
   ShieldCheck,
   Banknote,
   Gift,
-  LifeBuoy
+  LifeBuoy,
+  Coins,
+  Calculator
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SEO from '../components/SEO';
@@ -65,6 +67,20 @@ const customers = [
       'Run reports on rent and arrears',
       'Answer support requests the landlord sends to its desk'
     ]
+  },
+  {
+    icon: <Coins className="w-7 h-7" />,
+    product: 'Lipa Mdogo Mdogo',
+    who: 'Tenants who pay rent in small amounts',
+    gradient: 'from-emerald-500 to-cyan-500',
+    intro:
+      'Many tenants earn a little at a time, not a lump sum on rent day. You help them put money towards rent whenever they can, while the landlord receives the full rent on the due date.',
+    tasks: [
+      'Set the tenant up with their landlord’s details',
+      'The tenant confirms the plan with a one-time code sent to their phone',
+      'The tenant pays towards rent in small amounts, from KES 10, by M-Pesa',
+      'You earn on every instalment they pay'
+    ]
   }
 ];
 
@@ -88,6 +104,11 @@ const tools = [
     icon: <LifeBuoy className="w-6 h-6" />,
     title: 'Desk requests',
     desc: 'Customers raise requests inside their own product. They arrive in your Desk requests tab for you to answer.'
+  },
+  {
+    icon: <Coins className="w-6 h-6" />,
+    title: 'Rent instalments',
+    desc: 'Set tenants up on Lipa Mdogo Mdogo and follow each one’s progress. Your earnings from every instalment are paid straight to you.'
   },
   {
     icon: <Wallet className="w-6 h-6" />,
@@ -116,6 +137,29 @@ const earnings = [
     icon: <Gift className="w-7 h-7 text-purple-400" />,
     title: 'Milestone and support bonuses',
     desc: 'A milestone bonus is paid when enough of your accounts stay on as paying customers, and a monthly support quality bonus rewards good support. The conditions are explained at onboarding. Bonuses are approved and paid by the Samuhia top desk.'
+  },
+  {
+    icon: <Coins className="w-7 h-7 text-emerald-400" />,
+    title: 'Rent instalments',
+    desc: 'Set a tenant up on Lipa Mdogo Mdogo and you earn a share of the service fee on every instalment they pay, paid straight to your desk, plus a bonus when they finish the month’s rent on time. It is the same on every rank, and it keeps coming for as long as the tenant keeps paying.'
+  }
+];
+
+const projections = [
+  {
+    band: 'Part-time',
+    amount: 'KES 1,120',
+    detail: '8 tenants paying KES 5,000 rent weekly, and 2 Excel imports'
+  },
+  {
+    band: 'Starter',
+    amount: 'KES 4,276',
+    detail: '20 tenants paying KES 6,000 rent weekly, 4 chama accounts and 6 imports'
+  },
+  {
+    band: 'Steady',
+    amount: 'KES 13,874',
+    detail: '80 tenants paying KES 8,000 rent weekly, 10 chama accounts, 2 landlord accounts and 10 imports'
   }
 ];
 
@@ -157,9 +201,9 @@ export default function ExplorePage() {
   return (
     <>
       <SEO
-        title="Explore Samuhia Desk - Support Chamas, Schools and Landlords in Kenya"
-        description="See what a Samuhia Desk agent does for chamas on MyChama, schools on MyRegister and landlords on Plot Yangu, and how the agent earns."
-        keywords="Samuhia Desk, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, rent collection Kenya, earn as an agent Kenya"
+        title="Explore Samuhia Desk - Earn from Chamas, Schools, Landlords and Rent Instalments in Kenya"
+        description="See what a Samuhia Desk agent does for chamas, schools, landlords and tenants paying rent in small amounts with Lipa Mdogo Mdogo, and the projected income."
+        keywords="Samuhia Desk, Lipa Mdogo Mdogo agent, rent instalments Kenya, pay rent in small amounts, MyChama agent, MyRegister agent, Plot Yangu agent, chama support Kenya, school SMS Kenya, rent collection Kenya, earn as an agent Kenya"
         canonicalUrl="https://desk.samuhia.co.ke/explore"
       />
 
@@ -198,7 +242,7 @@ export default function ExplorePage() {
             </h1>
             <p className="text-base sm:text-lg text-gray-300 mb-8">
               Samuhia Desk gives agents one place to set customers up, keep their records and messages in order, and
-              get paid for the work.
+              get paid for the work, including a share of every rent instalment your tenants pay.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <button
@@ -213,6 +257,14 @@ export default function ExplorePage() {
               >
                 Sign in
               </button>
+              <a
+                href="https://samuhia.co.ke/careers/#calculator"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 rounded-full border-2 border-emerald-400 text-emerald-300 hover:bg-emerald-400 hover:text-black font-semibold transition-all inline-flex items-center justify-center gap-2"
+              >
+                <Calculator className="w-5 h-5" /> Estimate your income
+              </a>
             </div>
           </motion.div>
         </section>
@@ -225,11 +277,11 @@ export default function ExplorePage() {
                 What an agent does
               </h2>
               <p className="text-gray-400 max-w-2xl mx-auto">
-                You support three kinds of customer. Each uses a Samuhia product, and the desk is where you work on their
+                You support four kinds of customer. Each uses a Samuhia product, and the desk is where you work on their
                 behalf.
               </p>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               {customers.map((c) => (
                 <div key={c.product} className="bg-gray-800/40 border border-gray-700 rounded-2xl p-6 flex flex-col">
                   <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${c.gradient} flex items-center justify-center mb-4`}>
@@ -279,11 +331,11 @@ export default function ExplorePage() {
                 How you earn
               </h2>
               <p className="text-gray-400 max-w-2xl mx-auto">
-                Three ways, all tracked on your earnings screen. Exact rates are shown in your dashboard and explained at
+                Four ways, all tracked on your earnings screen. Exact rates are shown in your dashboard and explained at
                 onboarding.
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               {earnings.map((e) => (
                 <div key={e.title} className="bg-gradient-to-br from-cyan-900/20 to-purple-900/20 border border-gray-700 rounded-2xl p-6">
                   <div className="mb-3">{e.icon}</div>
@@ -291,6 +343,51 @@ export default function ExplorePage() {
                   <p className="text-gray-300 text-sm">{e.desc}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Projected income */}
+        <section className="relative py-16 px-4 sm:px-6 z-10 bg-gradient-to-b from-transparent to-gray-900/50" aria-labelledby="projection-heading">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-10">
+              <h2 id="projection-heading" className="text-3xl sm:text-4xl font-bold mb-3">
+                What it could add up to
+              </h2>
+              <p className="text-gray-400 max-w-2xl mx-auto">
+                Rent instalments pay a little on every payment, so what you earn grows with the number of tenants you
+                keep. One tenant paying KES 8,000 rent weekly is projected to earn you about{' '}
+                <span className="text-emerald-300 font-semibold">KES 107 a month</span>, or about{' '}
+                <span className="text-emerald-300 font-semibold">KES 196</span> if they pay daily.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {projections.map((p) => (
+                <div key={p.band} className="bg-gray-800/40 border border-gray-700 rounded-2xl p-6">
+                  <p className="text-sm text-gray-400">{p.band}</p>
+                  <p className="text-3xl font-bold text-emerald-300 my-2 break-words">
+                    {p.amount}
+                    <span className="text-base font-medium text-gray-400"> a month</span>
+                  </p>
+                  <p className="text-sm text-gray-300">{p.detail}</p>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 max-w-3xl mx-auto text-center mt-6">
+              Projected, not guaranteed. Figures use Samuhia’s current prices, are rounded down, and assume your
+              customers keep paying and 7 in 10 tenants finish the month’s rent on time. Your real earnings depend on
+              how many customers you set up and keep active, and Samuhia may change prices. Team shares and bonuses are
+              not included.
+            </p>
+            <div className="flex justify-center mt-8">
+              <a
+                href="https://samuhia.co.ke/careers/#calculator"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 rounded-full border-2 border-emerald-400 text-emerald-300 hover:bg-emerald-400 hover:text-black font-semibold transition-all inline-flex items-center gap-2"
+              >
+                <Calculator className="w-5 h-5" /> Try the income calculator
+              </a>
             </div>
           </div>
         </section>
